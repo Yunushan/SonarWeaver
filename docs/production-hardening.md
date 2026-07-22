@@ -86,12 +86,22 @@ Docker deployments should use named volumes for data, logs, and extensions. K3s 
 
 ## Container hardening
 
-- Pin the official image by immutable version and, where maintained, digest.
+- Pin the official image by immutable digest; retain its reviewed version in the release record.
 - Scan the exact image and configuration used for the release.
+- Keep Compose secret files owner-readable only; the bootstrap enforces mode `0600` for its JDBC password file.
 - Do not add an unreviewed package manager or debugging tools to the runtime image.
 - Drop unnecessary Linux capabilities and prevent privilege escalation.
 - Use read-only root filesystems where compatible, while supplying writable data, extension, log, and temporary paths.
 - Define CPU/memory requests and limits based on measured load.
+
+## Native Linux service sandbox
+
+The managed systemd unit uses `ProtectSystem=strict` and permits writes only
+to the configured data, log, and temporary directories. It also removes Linux
+capabilities, uses private temporary and device namespaces, and restricts the
+network address families to local Unix sockets plus IPv4/IPv6. Preserve these
+controls when extending the unit; add an explicit, reviewed write path rather
+than weakening the whole filesystem boundary.
 - Keep credentials out of environment dumps and support bundles.
 
 ## RKE2 and K3s hardening
@@ -111,6 +121,12 @@ For a full restricted namespace:
 9. Constrain scheduling to prepared nodes and define disruption behavior deliberately.
 
 Do not enable a deprecated bundled ingress controller merely for convenience. Discover and select a maintained cluster ingress or Gateway implementation.
+
+SonarWeaver's production installer enforces this boundary with a default-deny
+policy. It requires a database CIDR and allows DNS, database traffic, labelled
+ingress-controller traffic, and labelled monitoring traffic only. Operators
+must add reviewed policies before enabling external identity, SMTP, DevOps, or
+other integration egress.
 
 ## Availability: what Kubernetes does and does not provide
 
@@ -146,6 +162,15 @@ At minimum alert on:
 - TLS certificate expiry
 - Backup age and restore-test age
 
+For Kubernetes deployments with Prometheus Operator, configure the official
+chart's secret-backed `monitoringPasscodeSecretName` and
+`monitoringPasscodeSecretKey`, then enable its PodMonitor only after the
+operator CRD is present. The monitoring system must authenticate to
+`/api/monitoring/metrics` with the passcode and must not expose that passcode in
+values files, labels, logs, or dashboards. See SonarSource's
+[Prometheus setup guide](https://docs.sonarsource.com/sonarqube-server/2026.1/server-installation/on-kubernetes-or-openshift/set-up-monitoring/prometheus)
+for the chart-specific metrics configuration.
+
 Synchronize time on all server, database, proxy, and cluster nodes. Keep a change log that records SonarQube, Java, image, chart, database, plugin, and infrastructure versions.
 
 ## Supply-chain controls
@@ -156,6 +181,50 @@ Synchronize time on all server, database, proxy, and cluster nodes. Keep a chang
 - Scan repository configuration for secrets and unsafe Kubernetes/Docker settings.
 - Protect the default branch and require review for deployment changes.
 - Preserve third-party license notices when mirroring artifacts.
+
+GitHub Actions dependencies are reviewed through weekly Dependabot updates.
+Keep action references immutable where the release process permits and review
+automation updates with the same care as deployment code; an action can execute
+with the workflow's permissions.
+
+The pinned Python tools used only by CI are tracked in `requirements-ci.txt` and
+are included in that weekly Dependabot review.
+
+CI scans the exact immutable Compose image manifests and fails on fixable
+critical vulnerabilities. Investigate any report before replacing a reviewed
+digest; an image update must retain the corresponding SonarQube or PostgreSQL
+compatibility and recovery validation.
+
+The same checks run weekly, even when the repository has not changed, so newly
+disclosed vulnerabilities in approved immutable images are surfaced for review.
+
+The Kubernetes integration job also renders the production NetworkPolicy and
+submits it to a disposable Kubernetes API with server-side dry-run validation.
+Its Kind node image is also pinned by digest to keep the CI Kubernetes version
+and image identity reproducible.
+
+CI also publishes an SPDX SBOM for each reviewed Compose image. Retain the
+SBOMs with the release/change record so vulnerability findings can be evaluated
+against the exact deployed digest.
+
+Run the production verification command from an approved administration host
+after deployment and before accepting traffic:
+
+```bash
+./bin/sonarweaver verify \
+  --url https://sonarqube.example.internal \
+  --monitoring-passcode-file /run/secrets/sonarqube-monitoring-passcode
+```
+
+```powershell
+.\bin\sonarweaver.ps1 verify `
+  -Url https://sonarqube.example.internal `
+  -MonitoringPasscodeFile C:\secure\sonarqube-monitoring-passcode
+```
+
+It requires HTTPS, checks that `/api/system/status` reports `UP`, and verifies
+the protected monitoring endpoint without placing the passcode in command-line
+arguments.
 
 ## Configuration management
 

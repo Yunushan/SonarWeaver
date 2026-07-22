@@ -42,9 +42,11 @@ values.local.yaml
 values.local.yml
 
 # Ansible inventories, Vault files, and retry artifacts. Commit only examples.
-ansible/inventory/*.yml
+ansible/inventory/*
 !ansible/inventory/*.example.yml
-ansible/group_vars/**/*.vault.yml
+!ansible/inventory/README.md
+ansible/group_vars/**/vault.yml
+ansible/group_vars/**/*.vault*
 *.retry
 
 # Test and tooling output

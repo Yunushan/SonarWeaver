@@ -4,6 +4,7 @@
 set -eu
 
 MODE=check
+SYSCTL_FILE=${SONARWEAVER_SYSCTL_FILE:-/etc/sysctl.d/99-sonarweaver.conf}
 case "${1:-}" in
   '') ;;
   --check) MODE=check ;;
@@ -13,7 +14,7 @@ case "${1:-}" in
 Usage: sudo ./node-prerequisites.sh [--check|--apply]
 
 Run this on every Linux node eligible to host SonarQube. --apply persists the
-required Elasticsearch kernel and service-user limits.
+required Elasticsearch kernel limits.
 EOF
     exit 0
     ;;
@@ -32,9 +33,9 @@ if [ "$MODE" = apply ]; then
     printf '%s\n' '# Managed by SonarWeaver.'
     printf 'vm.max_map_count=%s\n' "$map_count"
     printf 'fs.file-max=%s\n' "$file_max"
-  } >/etc/sysctl.d/99-sonarweaver.conf
-  chmod 0644 /etc/sysctl.d/99-sonarweaver.conf
-  sysctl -p /etc/sysctl.d/99-sonarweaver.conf >/dev/null
+  } >"$SYSCTL_FILE"
+  chmod 0644 "$SYSCTL_FILE"
+  sysctl -p "$SYSCTL_FILE" >/dev/null
 fi
 
 failed=false

@@ -135,7 +135,7 @@ The unified path is:
 ```bash
 ./bin/sonarweaver doctor docker
 ./bin/sonarweaver install docker evaluation --apply-sysctl
-./bin/sonarweaver status docker
+./bin/sonarweaver status docker evaluation
 ```
 
 The direct bootstrap provides the same evaluation flow, creates an untracked `.env` and secret file when absent, and starts both SonarQube and the local evaluation database:
@@ -162,6 +162,14 @@ The definition should pin `sonarqube:26.7.0.124771-community` for the Community 
 SonarSource warns against bind mounts for those paths because they can prevent correct plugin initialization. Never use `docker compose down -v`, `docker volume prune`, or `docker system prune` without resolving and protecting every required volume first.
 
 For production, point SonarQube to an independently operated supported database. A database container in the same Compose project is a convenience deployment, not the production reference architecture.
+
+If a production bootstrap would replace the image of an existing SonarQube
+container, it stops until both `--upgrade-approved` and `--backup-verified`
+are supplied. Use those acknowledgements only after completing the upgrade and
+isolated restore steps in [backup and upgrade](backup-upgrade.md).
+On PowerShell, use `-UpgradeApproved -BackupVerified` with
+`./Bootstrap.ps1 -Mode production`, or through the wrapper:
+`./bin/sonarweaver.ps1 install docker production -UpgradeApproved -BackupVerified`.
 
 ## RKE2 and K3s
 
@@ -216,11 +224,17 @@ Replace `rke2` with `k3s` for a K3s context. This command uses disposable H2 eva
   --jdbc-user sonarqube \
   --jdbc-password-file /run/secrets/sonarqube-jdbc-password \
   --monitoring-passcode-file /run/secrets/sonarqube-monitoring-passcode \
+  --monitoring-namespace monitoring \
   --storage-class fast-rwo \
+  --database-egress-cidr 10.42.0.10/32 \
   --node-prerequisites-ready
 ```
 
-Add `--hostname`, `--ingress-class`, and `--tls-secret` when the installer should enable ingress. The published official chart package is pinned to `2026.3.1`; its Server `appVersion` is also `2026.3.1`.
+For production ingress, add `--hostname`, `--ingress-class`,
+`--ingress-namespace`, and `--tls-secret`; TLS is mandatory. The installer
+labels the selected ingress-controller namespace to permit traffic only from
+that namespace. The published official chart package is pinned to `2026.3.1`;
+its Server `appVersion` is also `2026.3.1`.
 
 Use common settings together with the matching distribution overlay:
 
@@ -248,6 +262,15 @@ initFs:
 ```
 
 Do this only after confirming the nodes and persistent volume permissions already satisfy the requirements.
+
+The production installer applies a default-deny NetworkPolicy, then permits
+only DNS, TCP access to the explicit IPv4/IPv6 `--database-egress-cidr` and port, ingress
+from the selected ingress-controller namespace, and monitoring from the
+required `--monitoring-namespace`, which it labels
+`sonarweaver.io/network-access=monitoring`. Add separately reviewed
+NetworkPolicies for any identity provider, SMTP, DevOps platform, update source,
+or other approved integration; egress remains denied until it is explicitly
+allowed.
 
 ### RKE2 notes
 

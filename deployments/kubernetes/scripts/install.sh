@@ -20,8 +20,12 @@ JDBC_USER=
 JDBC_PASSWORD_FILE=
 MONITORING_PASSCODE_FILE=
 STORAGE_CLASS=
+DATABASE_EGRESS_CIDR=
+DATABASE_PORT=5432
 HOSTNAME=
 INGRESS_CLASS=
+INGRESS_NAMESPACE=
+MONITORING_NAMESPACE=
 TLS_SECRET=
 NODE_PREREQUISITES_READY=false
 ALLOW_UNSUPPORTED_KUBERNETES=false
@@ -56,6 +60,70 @@ validate_dns_name() {
   esac
   [ "${#value}" -le 253 ]
 }
+validate_cidr() {
+  value=$1
+  address=${value%/*}
+  prefix=${value##*/}
+  [ "$address" != "$value" ] || return 1
+  case "$address" in */*) return 1 ;; esac
+  case "$prefix" in ''|*[!0-9]*) return 1 ;; esac
+
+  case "$address" in
+    *.*)
+      [ "$prefix" -le 32 ] 2>/dev/null || return 1
+      old_ifs=$IFS
+      IFS=.
+      set -- $address
+      IFS=$old_ifs
+      [ "$#" -eq 4 ] || return 1
+      for octet in "$@"; do
+        case "$octet" in ''|*[!0-9]*) return 1 ;; esac
+        [ "$octet" -le 255 ] 2>/dev/null || return 1
+      done
+      return 0
+      ;;
+    *:*)
+      case "$address" in
+        :[!:]*) return 1 ;;
+        *[!:]:) return 1 ;;
+        :|*[!0-9A-Fa-f:]*) return 1 ;;
+      esac
+      [ "$prefix" -le 128 ] 2>/dev/null || return 1
+      compressed=false
+      case "$address" in
+        *::*)
+          compressed=true
+          suffix=${address#*::}
+          case "$suffix" in *::*) return 1 ;; esac
+          ;;
+      esac
+      old_ifs=$IFS
+      IFS=:
+      set -- $address
+      IFS=$old_ifs
+      if [ "$compressed" = true ]; then
+        [ "$#" -le 7 ] || return 1
+      else
+        [ "$#" -eq 8 ] || return 1
+      fi
+      for hextet in "$@"; do
+        if [ -z "$hextet" ]; then
+          [ "$compressed" = true ] || return 1
+          continue
+        fi
+        case "$hextet" in ''|*[!0-9A-Fa-f]*) return 1 ;; esac
+        [ "${#hextet}" -le 4 ] || return 1
+      done
+      return 0
+      ;;
+    *) return 1 ;;
+  esac
+}
+validate_port() {
+  value=$1
+  case "$value" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$value" -ge 1 ] 2>/dev/null && [ "$value" -le 65535 ] 2>/dev/null
+}
 
 usage() {
   cat <<'EOF'
@@ -67,6 +135,7 @@ Required for production:
   --jdbc-password-file PATH
   --monitoring-passcode-file PATH
   --storage-class NAME
+  --database-egress-cidr CIDR
   --node-prerequisites-ready
 
 Options:
@@ -77,8 +146,12 @@ Options:
   --chart-version VERSION           Default: locked official chart
   --community-version VERSION       Exact Community Build number
   --hostname HOST                   Enable ingress
-  --ingress-class NAME              Defaults to nginx (RKE2) or traefik (K3s)
-  --tls-secret NAME                 Existing TLS secret for the hostname
+  --ingress-class NAME              Existing IngressClass; required with --hostname
+  --ingress-namespace NAME          Ingress controller namespace; required with --hostname in production
+  --monitoring-namespace NAME       Prometheus namespace; required in production
+  --tls-secret NAME                 Existing TLS secret; required with --hostname in production
+  --database-egress-cidr CIDR       Production IPv4 or IPv6 database network CIDR
+  --database-port PORT              Production database TCP port (default: 5432)
   --allow-unsupported-kubernetes    Bypass the chart's Kubernetes 1.32-1.35 gate
   --dry-run                         Render manifests without applying them
   -h, --help                        Show this help
@@ -102,8 +175,12 @@ while [ "$#" -gt 0 ]; do
     --jdbc-password-file) need_value "$@"; JDBC_PASSWORD_FILE=$2; shift 2 ;;
     --monitoring-passcode-file) need_value "$@"; MONITORING_PASSCODE_FILE=$2; shift 2 ;;
     --storage-class) need_value "$@"; STORAGE_CLASS=$2; shift 2 ;;
+    --database-egress-cidr) need_value "$@"; DATABASE_EGRESS_CIDR=$2; shift 2 ;;
+    --database-port) need_value "$@"; DATABASE_PORT=$2; shift 2 ;;
     --hostname) need_value "$@"; HOSTNAME=$2; shift 2 ;;
     --ingress-class) need_value "$@"; INGRESS_CLASS=$2; shift 2 ;;
+    --ingress-namespace) need_value "$@"; INGRESS_NAMESPACE=$2; shift 2 ;;
+    --monitoring-namespace) need_value "$@"; MONITORING_NAMESPACE=$2; shift 2 ;;
     --tls-secret) need_value "$@"; TLS_SECRET=$2; shift 2 ;;
     --node-prerequisites-ready) NODE_PREREQUISITES_READY=true; shift ;;
     --allow-unsupported-kubernetes) ALLOW_UNSUPPORTED_KUBERNETES=true; shift ;;
@@ -130,6 +207,13 @@ fi
 if [ -n "$TLS_SECRET" ]; then
   validate_dns_name "$TLS_SECRET" || die "--tls-secret must be a lowercase Kubernetes resource name."
 fi
+if [ -n "$INGRESS_NAMESPACE" ]; then
+  validate_dns_label "$INGRESS_NAMESPACE" 63 || die "--ingress-namespace must be a lowercase DNS label of at most 63 characters."
+fi
+if [ -n "$MONITORING_NAMESPACE" ]; then
+  validate_dns_label "$MONITORING_NAMESPACE" 63 || die "--monitoring-namespace must be a lowercase DNS label of at most 63 characters."
+fi
+validate_port "$DATABASE_PORT" || die "--database-port must be an integer between 1 and 65535."
 
 command -v kubectl >/dev/null 2>&1 || die "kubectl is required."
 command -v helm >/dev/null 2>&1 || die "Helm 3 is required."
@@ -157,10 +241,10 @@ case "$detected_version" in
   *) log "Could not confirm distribution from kubelet version: ${detected_version:-unknown}" ;;
 esac
 
-if [ -z "$INGRESS_CLASS" ]; then
-  if [ "$DISTRIBUTION" = rke2 ]; then INGRESS_CLASS=nginx; else INGRESS_CLASS=traefik; fi
+if [ -n "$HOSTNAME" ]; then
+  [ -n "$INGRESS_CLASS" ] || die "--hostname requires --ingress-class."
+  validate_dns_name "$INGRESS_CLASS" || die "--ingress-class must be a lowercase Kubernetes resource name."
 fi
-validate_dns_name "$INGRESS_CLASS" || die "--ingress-class must be a lowercase Kubernetes resource name."
 
 temp_dir=$(mktemp -d "${TMPDIR:-/tmp}/sonarweaver-helm.XXXXXX")
 cleanup() { rm -rf "$temp_dir"; }
@@ -173,9 +257,17 @@ if [ "$PROFILE" = production ]; then
   validate_secret_file "--jdbc-password-file" "$JDBC_PASSWORD_FILE"
   validate_secret_file "--monitoring-passcode-file" "$MONITORING_PASSCODE_FILE"
   [ -n "$STORAGE_CLASS" ] || die "Production requires an explicit durable --storage-class."
+  validate_cidr "$DATABASE_EGRESS_CIDR" || die "Production requires --database-egress-cidr in CIDR form."
+  [ -n "$MONITORING_NAMESPACE" ] || die "Production requires --monitoring-namespace."
   [ "$NODE_PREREQUISITES_READY" = true ] || die "Run node-prerequisites.sh on every eligible node, then pass --node-prerequisites-ready."
   kubectl get storageclass "$STORAGE_CLASS" >/dev/null 2>&1 || \
     die "StorageClass $STORAGE_CLASS was not found in the current cluster."
+  kubectl get namespace "$MONITORING_NAMESPACE" >/dev/null 2>&1 || \
+    die "Monitoring namespace $MONITORING_NAMESPACE was not found in the current cluster."
+  if [ -n "$HOSTNAME" ]; then
+    [ -n "$TLS_SECRET" ] || die "Production ingress requires --tls-secret."
+    [ -n "$INGRESS_NAMESPACE" ] || die "Production ingress requires --ingress-namespace."
+  fi
 else
   [ -z "$JDBC_URL$JDBC_USER$JDBC_PASSWORD_FILE$STORAGE_CLASS" ] || die "Evaluation mode does not accept JDBC or storage options."
   if [ -z "$MONITORING_PASSCODE_FILE" ]; then
@@ -202,6 +294,7 @@ helm repo update >/dev/null
 
 common_values="$PROJECT_ROOT/deployments/kubernetes/common/values.yaml"
 distro_values="$PROJECT_ROOT/deployments/kubernetes/$DISTRIBUTION/values.yaml"
+network_policy_template="$PROJECT_ROOT/deployments/kubernetes/common/network-policy.yaml.in"
 
 set -- upgrade --install "$RELEASE" sonarqube/sonarqube \
   --namespace "$NAMESPACE" --create-namespace \
@@ -262,8 +355,22 @@ if [ "$PROFILE" = production ]; then
     pod-security.kubernetes.io/enforce=restricted \
     pod-security.kubernetes.io/audit=restricted \
     pod-security.kubernetes.io/warn=restricted --overwrite >/dev/null
+  kubectl label namespace "$MONITORING_NAMESPACE" sonarweaver.io/network-access=monitoring --overwrite >/dev/null
   kubectl -n "$NAMESPACE" create secret generic sonarqube-jdbc \
     --from-file="password=$JDBC_PASSWORD_FILE" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+  if [ -n "$HOSTNAME" ]; then
+    kubectl get namespace "$INGRESS_NAMESPACE" >/dev/null 2>&1 || \
+      die "Ingress namespace $INGRESS_NAMESPACE was not found in the current cluster."
+    kubectl -n "$NAMESPACE" get secret "$TLS_SECRET" >/dev/null 2>&1 || \
+      die "TLS secret $TLS_SECRET was not found in namespace $NAMESPACE."
+    kubectl label namespace "$INGRESS_NAMESPACE" sonarweaver.io/network-access=ingress --overwrite >/dev/null
+  fi
+  [ -f "$network_policy_template" ] || die "NetworkPolicy template is missing: $network_policy_template"
+  sed \
+    -e "s|@RELEASE@|$RELEASE|g" \
+    -e "s|@DATABASE_EGRESS_CIDR@|$DATABASE_EGRESS_CIDR|g" \
+    -e "s|port: 0 # @DATABASE_PORT@|port: $DATABASE_PORT|g" \
+    "$network_policy_template" | kubectl -n "$NAMESPACE" apply -f - >/dev/null
 fi
 kubectl -n "$NAMESPACE" create secret generic sonarqube-monitoring \
   --from-file="passcode=$MONITORING_PASSCODE_FILE" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
@@ -273,7 +380,11 @@ helm "$@"
 
 log "SonarQube release $RELEASE is ready in namespace $NAMESPACE."
 if [ -n "$HOSTNAME" ]; then
-  log "Open https://$HOSTNAME (or http://$HOSTNAME without TLS) and immediately change admin/admin."
+  if [ "$PROFILE" = production ]; then
+    log "Open https://$HOSTNAME and immediately change admin/admin."
+  else
+    log "Open https://$HOSTNAME (or http://$HOSTNAME without TLS) and immediately change admin/admin."
+  fi
 else
   log "Access locally with: kubectl -n $NAMESPACE port-forward svc/$RELEASE-sonarqube 9000:9000"
 fi

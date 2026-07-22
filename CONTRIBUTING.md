@@ -22,14 +22,23 @@ Use the same checks that run in continuous integration. The tools required for t
 - yamllint
 - Docker with the Compose plugin
 - Helm 3
+- Kind for the disposable Kubernetes integration test
+- Ansible, ansible-lint, and Molecule for changes under `ansible/`
 
 Run the relevant checks for every file you change. The CI workflow contains the canonical commands and validates:
 
 - all tracked shell scripts with ShellCheck;
+- native Linux installer production/evaluation contract checks;
+- Windows installer security-invariant checks;
 - PowerShell parsing and PSScriptAnalyzer findings;
 - repository YAML with yamllint;
 - Docker Compose rendering without starting containers; and
+- a disposable Docker Compose evaluation deployment that must report API status `UP`;
+- a disposable Kubernetes evaluation deployment that must report API status `UP`;
 - K3s and RKE2 values by rendering the pinned official SonarSource Helm chart.
+- Ansible linting and playbook/Molecule syntax for the optional managed-Linux path.
+- GitHub Actions policy and repository-history secret scanning.
+- CI policy invariants for pinned runners, action commits, and image digests.
 
 Tests must not install or start SonarQube, modify host kernel settings, or connect to a production database.
 

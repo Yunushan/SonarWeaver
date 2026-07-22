@@ -2,7 +2,7 @@ name: sonarweaver
 
 services:
   sonarqube:
-    image: ${SONARQUBE_IMAGE:-sonarqube:26.7.0.124771-community}
+    image: ${SONARQUBE_IMAGE:-sonarqube@sha256:160bd2f6a3485bd09b655ef22dd63c02bd1fa7ba82aa5d9973fd010b8bcca0b3}
     restart: unless-stopped
     read_only: true
     security_opt:

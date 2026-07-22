@@ -13,7 +13,8 @@ SonarWeaver - multi-platform SonarQube deployment toolkit
 Usage:
   sonarweaver doctor <linux|macos|unix|docker|rke2|k3s>
   sonarweaver install <linux|macos|docker|rke2|k3s> [target options]
-  sonarweaver status <linux|macos|docker|rke2|k3s> [namespace]
+  sonarweaver status <linux|macos|docker|rke2|k3s> [mode|namespace]
+  sonarweaver verify --url HTTPS_URL --monitoring-passcode-file PATH
   sonarweaver version
 
 Examples:
@@ -40,7 +41,7 @@ fi
 
 case "$command_name" in
   -h|--help|help) usage; exit 0 ;;
-  doctor|install|status) ;;
+  doctor|install|status|verify) ;;
   *) printf 'Unknown command: %s\n' "$command_name" >&2; usage >&2; exit 1 ;;
 esac
 
@@ -49,6 +50,12 @@ target=$1
 shift
 
 case "$command_name:$target" in
+  verify:--url)
+    exec "$ROOT/deployments/verify-production.sh" --url "$@"
+    ;;
+  verify:-h|verify:--help)
+    exec "$ROOT/deployments/verify-production.sh" --help
+    ;;
   doctor:linux)
     exec "$ROOT/deployments/native/linux/install.sh" --evaluation --dry-run "$@"
     ;;
@@ -90,7 +97,14 @@ case "$command_name:$target" in
     ;;
   status:docker)
     cd "$ROOT/deployments/docker"
-    exec docker compose --env-file .env -f compose.yaml -f compose.local.yaml ps "$@"
+    mode=${1:-evaluation}
+    [ "$#" -eq 0 ] || shift
+    case "$mode" in
+      evaluation) set -- --env-file .env -f compose.yaml -f compose.local.yaml ps "$@" ;;
+      production) set -- --env-file .env -f compose.yaml ps "$@" ;;
+      *) printf '%s\n' 'Docker status mode must be evaluation or production.' >&2; exit 1 ;;
+    esac
+    exec docker compose "$@"
     ;;
   status:rke2|status:k3s)
     namespace=${1:-sonarqube}

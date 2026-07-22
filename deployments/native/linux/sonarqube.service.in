@@ -17,12 +17,17 @@ LimitNOFILE=131072
 LimitNPROC=8192
 NoNewPrivileges=true
 PrivateTmp=true
+PrivateDevices=true
 ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=@DATA_DIR@ @LOGS_DIR@ @TEMP_DIR@
 ProtectKernelLogs=true
 ProtectKernelModules=true
 ProtectKernelTunables=true
 ProtectControlGroups=true
 RestrictSUIDSGID=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 LockPersonality=true
 UMask=0027
 

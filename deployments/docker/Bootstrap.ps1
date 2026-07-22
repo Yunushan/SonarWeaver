@@ -4,11 +4,48 @@
 [CmdletBinding()]
 param(
     [ValidateSet('evaluation', 'production')]
-    [string]$Mode = 'evaluation'
+    [string]$Mode = 'evaluation',
+    [switch]$UpgradeApproved,
+    [switch]$BackupVerified
 )
 
 $ErrorActionPreference = 'Stop'
 $ScriptDirectory = $PSScriptRoot
+
+function Set-DockerSecretAcl {
+    param([string]$Path)
+
+    $currentSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    & icacls.exe $Path /inheritance:r /grant:r `
+        "*$currentSid`:(R)" `
+        '*S-1-5-18:(F)' `
+        '*S-1-5-32-544:(F)' | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Could not secure the Docker JDBC password file.' }
+}
+
+function Confirm-ProductionUpgrade {
+    $envContent = Get-Content -LiteralPath '.env' -Raw
+    $desiredMatch = [regex]::Match($envContent, '(?m)^SONARQUBE_IMAGE=([^\r\n]+)$')
+    if (-not $desiredMatch.Success) { throw 'SONARQUBE_IMAGE is missing from deployments/docker/.env.' }
+    $desiredImage = $desiredMatch.Groups[1].Value
+
+    $runningContainer = [string](& docker compose --env-file .env -f compose.yaml ps -q sonarqube 2>$null | Select-Object -First 1)
+    if ($LASTEXITCODE -ne 0) { throw 'Could not determine whether SonarQube is already running.' }
+    if (-not $runningContainer) { return }
+
+    $runningImage = [string](& docker inspect --format '{{.Config.Image}}' $runningContainer 2>$null | Select-Object -First 1)
+    if ($LASTEXITCODE -ne 0 -or -not $runningImage) {
+        throw 'Could not determine the running SonarQube image; inspect it before an upgrade.'
+    }
+
+    if ($runningImage -ne $desiredImage) {
+        if (-not ($UpgradeApproved -and $BackupVerified)) {
+            throw 'The requested image differs from the running SonarQube image. Complete the approved upgrade runbook and restore verification, then re-run with -UpgradeApproved -BackupVerified.'
+        }
+        Write-Output '[sonarweaver] Upgrade acknowledgement accepted for the changed SonarQube image.'
+    }
+}
+
 Push-Location $ScriptDirectory
 try {
     if (-not (Get-Command docker.exe -ErrorAction SilentlyContinue)) {
@@ -36,11 +73,13 @@ try {
     if ($secretBytes -contains 10 -or $secretBytes -contains 13) {
         throw 'secrets/jdbc_password must not contain line endings; create it without a trailing newline.'
     }
+    Set-DockerSecretAcl -Path $secretPath
 
     if ($Mode -eq 'production') {
         if ((Get-Content -LiteralPath '.env' -Raw) -match 'postgresql\.example\.invalid') {
             throw 'Set the external SONAR_JDBC_URL in deployments/docker/.env first.'
         }
+        Confirm-ProductionUpgrade
         & docker compose --env-file .env -f compose.yaml config --quiet
         if ($LASTEXITCODE -ne 0) { throw 'Docker Compose validation failed.' }
         & docker compose --env-file .env -f compose.yaml up -d

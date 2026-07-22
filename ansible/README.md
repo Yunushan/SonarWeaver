@@ -27,6 +27,9 @@ Install the required collections on the control host:
 ansible-galaxy collection install -r ansible/requirements.yml
 ```
 
+The collection and CI validator versions are intentionally exact locks. Update
+them only with the related Ansible syntax/lint and staging-deployment checks.
+
 Copy `ansible/inventory/production.example.yml` to a protected location and
 create a similarly protected variables file. Do not place secrets in Git. The
 database password file referenced below must already exist on every target and
@@ -54,7 +57,8 @@ ansible-playbook -i /secure/inventory.yml ansible/playbooks/site.yml
 The first run validates Java, creates the service identity and persistent
 directories, applies the required kernel limits, stages the pinned native
 installer, installs the release without starting it, renders the optional TLS
-proxy, then starts SonarQube and waits for `/api/system/status` to return `UP`.
+proxy, validates its certificate/key paths and `nginx -t`, then starts
+SonarQube and waits for `/api/system/status` to return `UP`.
 
 ## Secrets
 

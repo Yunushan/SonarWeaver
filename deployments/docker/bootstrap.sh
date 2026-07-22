@@ -6,16 +6,21 @@ set -eu
 SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 MODE=evaluation
 APPLY_SYSCTL=false
+UPGRADE_APPROVED=false
+BACKUP_VERIFIED=false
 
 usage() {
   cat <<'EOF'
-Usage: ./bootstrap.sh [evaluation|production] [--apply-sysctl]
+Usage: ./bootstrap.sh [evaluation|production] [options]
 
 evaluation  Starts SonarQube plus a same-host PostgreSQL container.
 production  Starts SonarQube with the external database configured in .env.
 
 The script creates a local password file when one does not exist. It never
 stores the database password in .env or in the Compose model.
+
+When production would replace a running SonarQube image, both
+--upgrade-approved and --backup-verified are required.
 EOF
 }
 
@@ -28,6 +33,8 @@ fi
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --apply-sysctl) APPLY_SYSCTL=true; shift ;;
+    --upgrade-approved) UPGRADE_APPROVED=true; shift ;;
+    --backup-verified) BACKUP_VERIFIED=true; shift ;;
     -h|--help) usage; exit 0 ;;
     *) printf 'Unknown option: %s\n' "$1" >&2; exit 1 ;;
   esac
@@ -43,6 +50,32 @@ if [ ! -f .env ]; then
   chmod 600 .env
   printf '%s\n' 'Created deployments/docker/.env from the example.'
 fi
+
+check_production_upgrade() {
+  desired_image=$(sed -n 's/^SONARQUBE_IMAGE=//p' .env | head -n 1)
+  [ -n "$desired_image" ] || {
+    printf '%s\n' 'SONARQUBE_IMAGE is missing from deployments/docker/.env.' >&2
+    exit 1
+  }
+
+  running_container=$(docker compose --env-file .env -f compose.yaml ps -q sonarqube 2>/dev/null || true)
+  [ -n "$running_container" ] || return 0
+  running_image=$(docker inspect --format '{{.Config.Image}}' "$running_container" 2>/dev/null || true)
+  [ -n "$running_image" ] || {
+    printf '%s\n' 'Could not determine the running SonarQube image; inspect it before an upgrade.' >&2
+    exit 1
+  }
+
+  if [ "$running_image" != "$desired_image" ]; then
+    if [ "$UPGRADE_APPROVED" != true ] || [ "$BACKUP_VERIFIED" != true ]; then
+      printf '%s\n' \
+        'The requested image differs from the running SonarQube image.' \
+        'Complete the approved upgrade runbook and restore verification, then re-run with --upgrade-approved --backup-verified.' >&2
+      exit 1
+    fi
+    printf '%s\n' '[sonarweaver] Upgrade acknowledgement accepted for the changed SonarQube image.'
+  fi
+}
 
 mkdir -p secrets
 chmod 700 secrets
@@ -62,6 +95,7 @@ if [ "$secret_size" != "$flat_size" ]; then
   printf '%s\n' 'secrets/jdbc_password must not contain line endings; create it with printf, not echo.' >&2
   exit 1
 fi
+chmod 600 secrets/jdbc_password
 
 if [ "$(uname -s 2>/dev/null || true)" = Linux ]; then
   current_map_count=$(sysctl -n vm.max_map_count 2>/dev/null || printf '0')
@@ -84,6 +118,7 @@ if [ "$MODE" = production ]; then
     printf '%s\n' 'Set the external SONAR_JDBC_URL in deployments/docker/.env first.' >&2
     exit 1
   fi
+  check_production_upgrade
   docker compose --env-file .env -f compose.yaml config --quiet
   docker compose --env-file .env -f compose.yaml up -d
 else

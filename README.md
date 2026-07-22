@@ -154,6 +154,7 @@ Node-local K3s `local-path` volumes are useful for evaluation but are not HA sto
 - [Platform and version support](docs/support-matrix.md)
 - [Native, Docker, RKE2, and K3s deployment guide](docs/deployment-guide.md)
 - [Production hardening](docs/production-hardening.md)
+- [Production acceptance gates](docs/production-readiness-gates.md)
 - [Backup, upgrade, and rollback](docs/backup-upgrade.md)
 - [Troubleshooting](docs/troubleshooting.md)
 - [Project support policy](SUPPORT.md)

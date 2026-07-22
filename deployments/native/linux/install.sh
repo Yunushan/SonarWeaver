@@ -196,6 +196,9 @@ chmod 0755 /usr/local/libexec/sonarweaver-start
 sed \
   -e "s|@SERVICE_USER@|$SERVICE_USER|g" \
   -e "s|@SERVICE_GROUP@|$SERVICE_GROUP|g" \
+  -e "s|@DATA_DIR@|$DATA_DIR|g" \
+  -e "s|@LOGS_DIR@|$LOGS_DIR|g" \
+  -e "s|@TEMP_DIR@|$TEMP_DIR|g" \
   "$SCRIPT_DIR/sonarqube.service.in" >/etc/systemd/system/sonarqube.service
 chmod 0644 /etc/systemd/system/sonarqube.service
 

@@ -92,7 +92,7 @@ verify_archive() {
     actual=$(sha256_file "$archive")
     [ "$actual" = "$expected_sha256" ] || die "SHA-256 mismatch for $archive"
     log "Archive SHA-256 verified."
-    return
+    return 0
   fi
 
   require_command gpg

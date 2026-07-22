@@ -6,6 +6,8 @@ on:
     branches:
       - main
   pull_request:
+  schedule:
+    - cron: '17 3 * * 1'
   workflow_dispatch:
 
 permissions:
@@ -18,11 +20,11 @@ concurrency:
 jobs:
   shell-and-yaml:
     name: Shell and YAML
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
 
@@ -60,25 +62,28 @@ jobs:
       - name: Lint YAML
         run: yamllint .
 
+      - name: Verify CI security invariants
+        run: python3 tests/ci-policy.py
+
   ansible:
     name: Ansible static checks
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.12'
 
       - name: Install Ansible validators
         run: |
           python -m pip install --upgrade pip
-          python -m pip install 'ansible-core>=2.20,<2.21' 'ansible-lint>=25.0.0,<26.0.0' 'molecule>=25.0.0,<26.0.0'
+          python -m pip install -r requirements-ci.txt
           ansible-galaxy collection install -r ansible/requirements.yml
 
       - name: Lint Ansible content
@@ -97,7 +102,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
 
@@ -147,13 +152,21 @@ jobs:
           $findings | Format-Table -AutoSize
           if ($findings) { exit 1 }
 
+      - name: Verify Windows installer security invariants
+        shell: powershell
+        run: .\tests\windows-installer-policy.ps1
+
+      - name: Run Windows production verifier contracts
+        shell: powershell
+        run: .\tests\verify-production.ps1
+
   docker-compose:
     name: Docker Compose
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
 
@@ -185,9 +198,66 @@ jobs:
               --file "${base}" --file "${overlay}" config --quiet
           done
 
+  docker-integration:
+    name: Docker Compose integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Start the pinned evaluation stack
+        working-directory: deployments/docker
+        shell: bash
+        run: |
+          ./bootstrap.sh evaluation --apply-sysctl
+
+      - name: Wait for SonarQube API health
+        shell: bash
+        run: |
+          for attempt in {1..90}; do
+            if curl --fail --silent --show-error http://127.0.0.1:9000/api/system/status | grep -q '"status":"UP"'; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo 'SonarQube did not report UP within 450 seconds.' >&2
+          exit 1
+
+      - name: Verify a PostgreSQL backup restores successfully
+        working-directory: deployments/docker
+        shell: bash
+        run: |
+          set -o pipefail
+          docker compose --env-file .env -f compose.yaml -f compose.local.yaml \
+            exec -T db createdb -U sonarqube sonarweaver_restore
+          docker compose --env-file .env -f compose.yaml -f compose.local.yaml \
+            exec -T db pg_dump --format=custom -U sonarqube -d sonarqube |
+            docker compose --env-file .env -f compose.yaml -f compose.local.yaml \
+              exec -T db pg_restore --exit-on-error --no-owner -U sonarqube -d sonarweaver_restore
+          docker compose --env-file .env -f compose.yaml -f compose.local.yaml \
+            exec -T db psql -tAc "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public');" \
+            -U sonarqube -d sonarweaver_restore | grep -qx t
+
+      - name: Collect Compose diagnostics
+        if: always()
+        working-directory: deployments/docker
+        shell: bash
+        run: |
+          docker compose --env-file .env -f compose.yaml -f compose.local.yaml ps
+          docker compose --env-file .env -f compose.yaml -f compose.local.yaml logs --no-color
+
+      - name: Stop the evaluation stack without deleting volumes
+        if: always()
+        working-directory: deployments/docker
+        shell: bash
+        run: docker compose --env-file .env -f compose.yaml -f compose.local.yaml down --remove-orphans
+
   helm:
     name: Helm (${{ matrix.distribution }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     strategy:
       fail-fast: false
@@ -197,7 +267,7 @@ jobs:
           - rke2
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
 
@@ -229,10 +299,150 @@ jobs:
             fi
           done
 
+          rendered_chart=$(mktemp)
           helm template sonarweaver sonarqube/sonarqube \
             --version "${chart_version}" \
             --kube-version "1.${kubernetes_minor}.0" \
             --namespace sonarqube \
             --values "${common_values}" \
             --values "${distribution_values}" \
-            >/dev/null
+            >"${rendered_chart}"
+
+          grep -q 'app.kubernetes.io/instance: sonarweaver' "${rendered_chart}"
+          grep -q 'app.kubernetes.io/name: sonarqube' "${rendered_chart}"
+
+  kubernetes-integration:
+    name: Kubernetes integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Create a supported disposable Kubernetes cluster
+        shell: bash
+        run: |
+          command -v kind
+          helm version --short
+          kind create cluster --name sonarweaver --image kindest/node:v1.35.0@sha256:452d707d4862f52530247495d180205e029056831160e22870e37e3f6c1ac31f --wait 3m
+
+      - name: Validate the rendered production NetworkPolicy with the Kubernetes API
+        shell: bash
+        run: |
+          kubectl create namespace sonarweaver-policy-test
+          sed \
+            -e 's|@RELEASE@|sonarqube|g' \
+            -e 's|@DATABASE_EGRESS_CIDR@|10.42.0.10/32|g' \
+            -e 's|port: 0 # @DATABASE_PORT@|port: 5432|g' \
+            deployments/kubernetes/common/network-policy.yaml.in |
+            kubectl -n sonarweaver-policy-test apply --dry-run=server -f -
+
+      - name: Install the evaluation release through SonarWeaver
+        shell: bash
+        run: ./bin/sonarweaver install k3s --profile evaluation
+
+      - name: Wait for SonarQube API health
+        shell: bash
+        run: |
+          kubectl -n sonarqube rollout status deployment/sonarqube-sonarqube --timeout=15m
+          kubectl -n sonarqube port-forward service/sonarqube-sonarqube 9000:9000 >/tmp/sonarweaver-port-forward.log 2>&1 &
+          port_forward_pid=$!
+          trap 'kill "${port_forward_pid}" 2>/dev/null || true' EXIT
+          for attempt in {1..90}; do
+            if curl --fail --silent --show-error http://127.0.0.1:9000/api/system/status | grep -q '"status":"UP"'; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo 'SonarQube did not report UP within 450 seconds after rollout.' >&2
+          exit 1
+
+      - name: Collect Kubernetes diagnostics
+        if: always()
+        shell: bash
+        run: |
+          kubectl -n sonarqube get pods,pvc,service,events --sort-by=.metadata.creationTimestamp || true
+          kubectl -n sonarqube logs deployment/sonarqube-sonarqube --all-containers=true --tail=300 || true
+          cat /tmp/sonarweaver-port-forward.log 2>/dev/null || true
+
+      - name: Delete the disposable cluster
+        if: always()
+        run: kind delete cluster --name sonarweaver
+
+  workflow-security:
+    name: Workflow security
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install workflow security scanner
+        run: |
+          python3 -m venv .zizmor-venv
+          .zizmor-venv/bin/pip install -r requirements-ci.txt
+
+      - name: Scan GitHub Actions workflows
+        run: .zizmor-venv/bin/zizmor .github/workflows
+
+  secret-scanning:
+    name: Secret scanning
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository history
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Scan repository history and working tree
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  image-vulnerability-scanning:
+    name: Image vulnerability scanning (${{ matrix.name }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: sonarqube
+            image: sonarqube@sha256:160bd2f6a3485bd09b655ef22dd63c02bd1fa7ba82aa5d9973fd010b8bcca0b3
+          - name: postgresql
+            image: postgres@sha256:3a82e1f56c8f0f5616a11103ac3d47e632c3938698946a7ad26da0df1334744a
+    steps:
+      - name: Scan immutable image for fixable critical vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ matrix.image }}
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: CRITICAL
+
+  image-sbom:
+    name: Image SBOM (${{ matrix.name }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: sonarqube
+            image: sonarqube@sha256:160bd2f6a3485bd09b655ef22dd63c02bd1fa7ba82aa5d9973fd010b8bcca0b3
+          - name: postgresql
+            image: postgres@sha256:3a82e1f56c8f0f5616a11103ac3d47e632c3938698946a7ad26da0df1334744a
+    steps:
+      - name: Generate SPDX software bill of materials
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: ${{ matrix.image }}
+          format: spdx-json
+          artifact-name: sonarweaver-${{ matrix.name }}-sbom

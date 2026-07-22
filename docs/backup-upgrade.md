@@ -58,6 +58,12 @@ docker system prune --volumes
 
 They can permanently remove database or SonarQube volumes. Stopping the stack with `docker compose stop` or a non-volume-removing `down` is safer when preparing maintenance.
 
+When `./bootstrap.sh production` detects that the requested immutable
+SonarQube image differs from a running container, it requires
+`--upgrade-approved --backup-verified`. This is an acknowledgement gate, not a
+substitute for a tested restore; use it only after completing the workflow
+below.
+
 ### RKE2 and K3s
 
 Record:
