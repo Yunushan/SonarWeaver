@@ -1,0 +1,9 @@
+# K3s overlay. local-path is convenient but node-local and is not HA storage.
+podLabels:
+  sonarweaver.io/distribution: k3s
+
+ingress:
+  enabled: false
+
+persistence:
+  storageClass: local-path

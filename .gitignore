@@ -1,0 +1,62 @@
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*.local
+config/local.*
+
+# Private keys and certificates
+*.crt
+*.jks
+*.key
+*.keystore
+*.p12
+*.pfx
+*.pem
+
+# Local secret manifests; commit only explicit examples
+**/secrets/*
+!**/secrets/.gitkeep
+!**/secrets/README.md
+!**/secrets/*.example
+secret.yaml
+secret.yml
+*-secret.yaml
+*-secret.yml
+!*-secret.example.yaml
+!*-secret.example.yml
+
+# SonarQube runtime state
+.scannerwork/
+data/
+downloads/
+extensions/
+logs/
+temp/
+work/
+
+# Deployment overrides
+compose.override.yaml
+compose.override.yml
+values.local.yaml
+values.local.yml
+
+# Test and tooling output
+.cache/
+.pytest_cache/
+coverage/
+dist/
+out/
+tmp/
+*.log
+*.tmp
+
+# Editors and operating systems
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
+*.swp
+*.swo
+*~

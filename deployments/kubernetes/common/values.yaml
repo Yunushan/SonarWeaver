@@ -1,0 +1,62 @@
+# Production-oriented defaults for the official SonarSource chart.
+community:
+  enabled: true
+  buildNumber: "26.7.0.124771"
+
+replicaCount: 1
+deploymentStrategy:
+  type: Recreate
+
+elasticsearch:
+  bootstrapChecks: true
+
+# In production, configure these values on every eligible node and keep the
+# privileged chart helpers disabled.
+initSysctl:
+  enabled: false
+initFs:
+  enabled: false
+
+monitoringPasscodeSecretName: sonarqube-monitoring
+monitoringPasscodeSecretKey: passcode
+
+jdbcOverwrite:
+  enabled: true
+  jdbcUrl: jdbc:postgresql://postgresql.example.invalid:5432/sonarqube
+  jdbcUsername: sonarqube
+  jdbcSecretName: sonarqube-jdbc
+  jdbcSecretPasswordKey: password
+
+persistence:
+  enabled: true
+  accessMode: ReadWriteOnce
+  size: 30Gi
+
+resources:
+  requests:
+    cpu: "1"
+    memory: 4Gi
+    ephemeral-storage: 2Gi
+  limits:
+    cpu: "2"
+    memory: 4Gi
+    ephemeral-storage: 10Gi
+
+service:
+  type: ClusterIP
+
+ingress:
+  enabled: false
+
+ingress-nginx:
+  enabled: false
+
+networkPolicy:
+  enabled: false
+
+serviceAccount:
+  create: true
+  automountToken: false
+
+tests:
+  enabled: true

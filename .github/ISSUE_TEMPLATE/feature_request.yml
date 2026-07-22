@@ -1,0 +1,66 @@
+---
+name: Feature request
+description: Propose an improvement to a supported deployment path
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Explain the operational problem first. Large changes should include security,
+        maintenance, and rollback implications.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and documentation for this request.
+          required: true
+        - label: I have not included credentials or private infrastructure details.
+          required: true
+
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment path
+      options:
+        - Native Linux
+        - Native Windows
+        - Native macOS
+        - Experimental Unix
+        - Docker Compose
+        - K3s
+        - RKE2
+        - Cross-platform
+        - Documentation or tooling
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: Describe the operational need and who encounters it.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Include prerequisites and how the behavior could be validated.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+
+  - type: textarea
+    id: risks
+    attributes:
+      label: Security, compatibility, and rollback considerations

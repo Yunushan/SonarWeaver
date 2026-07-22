@@ -1,0 +1,9 @@
+# RKE2 overlay. Select storage and ingress explicitly in production.
+podLabels:
+  sonarweaver.io/distribution: rke2
+
+ingress:
+  enabled: false
+
+persistence:
+  storageClass: ""

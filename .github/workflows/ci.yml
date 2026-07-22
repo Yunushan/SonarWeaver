@@ -1,0 +1,207 @@
+---
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shell-and-yaml:
+    name: Shell and YAML
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Install validators
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes shellcheck yamllint
+
+      - name: Verify executable scripts and run smoke tests
+        shell: bash
+        run: |
+          mapfile -d '' executables < <(
+            find deployments tests -type f -name '*.sh' -print0
+          )
+          executables+=(bin/sonarweaver)
+          for file in "${executables[@]}"; do
+            if [[ ! -x ${file} ]]; then
+              echo "Expected executable bit on ${file}" >&2
+              exit 1
+            fi
+          done
+          ./tests/smoke.sh
+
+      - name: Run ShellCheck
+        shell: bash
+        run: |
+          mapfile -d '' scripts < <(find . -type f -name '*.sh' -not -path './.git/*' -print0)
+          scripts+=(bin/sonarweaver)
+          if (( ${#scripts[@]} == 0 )); then
+            echo 'No shell scripts found.'
+            exit 0
+          fi
+          shellcheck "${scripts[@]}"
+
+      - name: Lint YAML
+        run: yamllint .
+
+  powershell:
+    name: Windows PowerShell 5.1
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Install PSScriptAnalyzer
+        shell: powershell
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module -Name PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force
+
+      - name: Validate PowerShell syntax
+        shell: powershell
+        run: |
+          $files = Get-ChildItem -Path . -Recurse -File -Include *.ps1, *.psd1, *.psm1
+          if (-not $files) {
+              Write-Host 'No PowerShell files found.'
+              exit 0
+          }
+
+          $failed = $false
+          foreach ($file in $files) {
+              $tokens = $null
+              $parseErrors = $null
+              [void][System.Management.Automation.Language.Parser]::ParseFile(
+                  $file.FullName,
+                  [ref]$tokens,
+                  [ref]$parseErrors
+              )
+              foreach ($parseError in $parseErrors) {
+                  Write-Error "$($file.FullName):$($parseError.Extent.StartLineNumber): $($parseError.Message)"
+                  $failed = $true
+              }
+          }
+          if ($failed) { exit 1 }
+
+      - name: Run PSScriptAnalyzer
+        shell: powershell
+        run: |
+          $files = Get-ChildItem -Path . -Recurse -File -Include *.ps1, *.psd1, *.psm1
+          if (-not $files) {
+              Write-Host 'No PowerShell files found.'
+              exit 0
+          }
+
+          $findings = foreach ($file in $files) {
+              Invoke-ScriptAnalyzer -Path $file.FullName -Severity Error, Warning
+          }
+          $findings | Format-Table -AutoSize
+          if ($findings) { exit 1 }
+
+  docker-compose:
+    name: Docker Compose
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Validate Compose files
+        shell: bash
+        run: |
+          base='deployments/docker/compose.yaml'
+          env_file='deployments/docker/.env.example'
+          if [[ ! -f ${base} || ! -f ${env_file} ]]; then
+            echo 'The base Compose file or its example environment file is missing.' >&2
+            exit 1
+          fi
+          for private_file in deployments/docker/.env deployments/docker/secrets/jdbc_password; do
+            if [[ -e ${private_file} ]]; then
+              echo "Private runtime file must not be committed: ${private_file}" >&2
+              exit 1
+            fi
+          done
+
+          docker compose --env-file "${env_file}" --file "${base}" config --quiet
+
+          mapfile -d '' overlays < <(
+            find deployments/docker -maxdepth 1 -type f \
+              \( -name 'compose.*.yaml' -o -name 'compose.*.yml' \) -print0
+          )
+          for overlay in "${overlays[@]}"; do
+            echo "Validating ${base} with ${overlay}"
+            docker compose --env-file "${env_file}" \
+              --file "${base}" --file "${overlay}" config --quiet
+          done
+
+  helm:
+    name: Helm (${{ matrix.distribution }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        distribution:
+          - k3s
+          - rke2
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Add official SonarSource chart repository
+        run: |
+          helm repo add sonarqube https://SonarSource.github.io/helm-chart-sonarqube
+          helm repo update
+
+      - name: Render official chart with SonarWeaver values
+        shell: bash
+        run: |
+          chart_version=$(sed -n 's/^SONARQUBE_HELM_CHART_VERSION="\([0-9][0-9.]*\)"$/\1/p' config/versions.env)
+          kubernetes_minor=$(sed -n 's/^KUBERNETES_MAX_MINOR="\([0-9][0-9]*\)"$/\1/p' config/versions.env)
+          if [[ ! ${chart_version} =~ ^[0-9]+(\.[0-9]+)+$ ]]; then
+            echo 'Invalid or missing SONARQUBE_HELM_CHART_VERSION in config/versions.env.' >&2
+            exit 1
+          fi
+          if [[ ! ${kubernetes_minor} =~ ^[0-9]+$ ]]; then
+            echo 'Invalid or missing KUBERNETES_MAX_MINOR in config/versions.env.' >&2
+            exit 1
+          fi
+
+          common_values='deployments/kubernetes/common/values.yaml'
+          distribution_values="deployments/kubernetes/${{ matrix.distribution }}/values.yaml"
+          for file in "${common_values}" "${distribution_values}"; do
+            if [[ ! -f "${file}" ]]; then
+              echo "Required values file not found: ${file}" >&2
+              exit 1
+            fi
+          done
+
+          helm template sonarweaver sonarqube/sonarqube \
+            --version "${chart_version}" \
+            --kube-version "1.${kubernetes_minor}.0" \
+            --namespace sonarqube \
+            --values "${common_values}" \
+            --values "${distribution_values}" \
+            >/dev/null

@@ -1,0 +1,58 @@
+name: sonarweaver
+
+services:
+  sonarqube:
+    image: ${SONARQUBE_IMAGE:-sonarqube:26.7.0.124771-community}
+    restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      SONAR_JDBC_URL: ${SONAR_JDBC_URL:?Set SONAR_JDBC_URL in .env}
+      SONAR_JDBC_USERNAME: ${SONAR_JDBC_USERNAME:?Set SONAR_JDBC_USERNAME in .env}
+    entrypoint:
+      - /bin/bash
+      - -ec
+      - |
+        export SONAR_JDBC_PASSWORD="$$(cat /run/secrets/jdbc_password)"
+        exec /opt/sonarqube/docker/entrypoint.sh
+    secrets:
+      - jdbc_password
+    ports:
+      - "${SONAR_BIND_ADDRESS:-127.0.0.1}:${SONAR_PORT:-9000}:9000"
+    volumes:
+      - sonarqube_data:/opt/sonarqube/data
+      - sonarqube_extensions:/opt/sonarqube/extensions
+      - sonarqube_logs:/opt/sonarqube/logs
+      - sonarqube_temp:/opt/sonarqube/temp
+    tmpfs:
+      - /tmp:size=256M,mode=1777
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          curl -fsS http://127.0.0.1:9000/api/system/status |
+          grep -q '"status":"UP"'
+      interval: 15s
+      timeout: 5s
+      retries: 40
+      start_period: 90s
+    stop_grace_period: 2m
+    networks:
+      - sonarqube
+
+secrets:
+  jdbc_password:
+    file: ./secrets/jdbc_password
+
+volumes:
+  sonarqube_data:
+  sonarqube_extensions:
+  sonarqube_logs:
+  sonarqube_temp:
+
+networks:
+  sonarqube:
+    driver: bridge

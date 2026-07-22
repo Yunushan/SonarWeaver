@@ -1,0 +1,104 @@
+#!/usr/bin/env sh
+# SPDX-License-Identifier: 0BSD
+
+set -eu
+
+BIN_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+ROOT=$(CDPATH='' cd -- "$BIN_DIR/.." && pwd)
+
+usage() {
+  cat <<'EOF'
+SonarWeaver - multi-platform SonarQube deployment toolkit
+
+Usage:
+  sonarweaver doctor <linux|macos|unix|docker|rke2|k3s>
+  sonarweaver install <linux|macos|docker|rke2|k3s> [target options]
+  sonarweaver status <linux|macos|docker|rke2|k3s> [namespace]
+  sonarweaver version
+
+Examples:
+  ./bin/sonarweaver install linux --evaluation
+  ./bin/sonarweaver install docker evaluation --apply-sysctl
+  ./bin/sonarweaver install rke2 --profile evaluation
+  ./bin/sonarweaver install k3s --help
+
+Run a target installer with --help for its full production options.
+EOF
+}
+
+[ "$#" -gt 0 ] || { usage; exit 0; }
+command_name=$1
+shift
+
+if [ "$command_name" = version ]; then
+  # shellcheck source=../config/versions.env
+  . "$ROOT/config/versions.env"
+  printf 'SonarWeaver %s\n' "$SONARWEAVER_VERSION"
+  printf 'Community Build %s; Helm chart %s\n' "$SONARQUBE_COMMUNITY_VERSION" "$SONARQUBE_HELM_CHART_VERSION"
+  exit 0
+fi
+
+case "$command_name" in
+  -h|--help|help) usage; exit 0 ;;
+  doctor|install|status) ;;
+  *) printf 'Unknown command: %s\n' "$command_name" >&2; usage >&2; exit 1 ;;
+esac
+
+[ "$#" -gt 0 ] || { printf '%s\n' 'A target is required.' >&2; usage >&2; exit 1; }
+target=$1
+shift
+
+case "$command_name:$target" in
+  doctor:linux)
+    exec "$ROOT/deployments/native/linux/install.sh" --evaluation --dry-run "$@"
+    ;;
+  doctor:macos)
+    exec "$ROOT/deployments/native/macos/install.sh" --evaluation --dry-run "$@"
+    ;;
+  doctor:unix)
+    exec "$ROOT/deployments/native/unix/preflight.sh" "$@"
+    ;;
+  doctor:docker)
+    command -v docker >/dev/null 2>&1 || { printf '%s\n' 'Docker is required.' >&2; exit 1; }
+    docker info >/dev/null
+    docker compose version >/dev/null
+    cd "$ROOT/deployments/docker"
+    docker compose --env-file .env.example -f compose.yaml -f compose.local.yaml config --quiet
+    printf '%s\n' 'Docker and Compose configuration checks passed.'
+    ;;
+  doctor:rke2|doctor:k3s)
+    exec "$ROOT/deployments/kubernetes/scripts/install.sh" \
+      --distribution "$target" --profile evaluation --dry-run "$@"
+    ;;
+  install:linux)
+    exec "$ROOT/deployments/native/linux/install.sh" "$@"
+    ;;
+  install:macos)
+    exec "$ROOT/deployments/native/macos/install.sh" "$@"
+    ;;
+  install:docker)
+    exec "$ROOT/deployments/docker/bootstrap.sh" "$@"
+    ;;
+  install:rke2|install:k3s)
+    exec "$ROOT/deployments/kubernetes/scripts/install.sh" --distribution "$target" "$@"
+    ;;
+  status:linux)
+    exec systemctl status sonarqube.service "$@"
+    ;;
+  status:macos)
+    exec launchctl print "gui/$(id -u)/io.github.yunushan.sonarweaver"
+    ;;
+  status:docker)
+    cd "$ROOT/deployments/docker"
+    exec docker compose --env-file .env -f compose.yaml -f compose.local.yaml ps "$@"
+    ;;
+  status:rke2|status:k3s)
+    namespace=${1:-sonarqube}
+    exec kubectl -n "$namespace" get pods,service,ingress
+    ;;
+  *)
+    printf 'Unsupported command/target combination: %s %s\n' "$command_name" "$target" >&2
+    usage >&2
+    exit 1
+    ;;
+esac

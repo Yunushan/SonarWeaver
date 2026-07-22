@@ -1,0 +1,9 @@
+---
+blank_issues_enabled: false
+contact_links:
+  - name: Private security report
+    url: https://github.com/Yunushan/SonarWeaver/security/advisories/new
+    about: Report a suspected vulnerability privately; do not publish secrets or exploit details.
+  - name: SonarSource community forum
+    url: https://community.sonarsource.com/
+    about: Ask questions about SonarQube behavior that is not caused by SonarWeaver.

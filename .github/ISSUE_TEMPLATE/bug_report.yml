@@ -1,0 +1,90 @@
+---
+name: Bug report
+description: Report reproducible incorrect or unsafe behavior
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a problem. Remove credentials and private infrastructure details from all output.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues for this problem.
+          required: true
+        - label: I removed passwords, tokens, private keys, and private infrastructure details.
+          required: true
+        - label: This is not an undisclosed security vulnerability.
+          required: true
+
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment path
+      options:
+        - Native Linux
+        - Native Windows
+        - Native macOS
+        - Experimental Unix
+        - Docker Compose
+        - K3s
+        - RKE2
+        - Documentation or tooling
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: SonarWeaver version or commit
+      placeholder: v0.1.0 or commit SHA
+    validations:
+      required: true
+
+  - type: input
+    id: sonarqube
+    attributes:
+      label: SonarQube edition and version
+      placeholder: Community Build 26.x
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: >-
+        Include OS, architecture, container engine, Kubernetes distribution/version,
+        and database version as applicable.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      placeholder: |
+        1. Run ...
+        2. Configure ...
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior and sanitized logs
+      render: shell
+    validations:
+      required: true

@@ -1,0 +1,41 @@
+# Evaluation/small-lab override. The database is on the same Docker host and is
+# not the recommended production topology.
+services:
+  sonarqube:
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      SONAR_JDBC_URL: jdbc:postgresql://db:5432/sonarqube
+      SONAR_JDBC_USERNAME: sonarqube
+
+  db:
+    image: ${POSTGRES_IMAGE:-postgres:18}
+    restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      POSTGRES_DB: sonarqube
+      POSTGRES_USER: sonarqube
+      POSTGRES_PASSWORD_FILE: /run/secrets/jdbc_password
+    secrets:
+      - jdbc_password
+    volumes:
+      - postgresql_data:/var/lib/postgresql
+    tmpfs:
+      - /tmp:size=128M,mode=1777
+      - /var/run/postgresql:size=16M,mode=0775
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -d "$${POSTGRES_DB}" -U "$${POSTGRES_USER}"
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - sonarqube
+
+volumes:
+  postgresql_data:

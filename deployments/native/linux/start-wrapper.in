@@ -1,0 +1,10 @@
+#!/usr/bin/env sh
+# SPDX-License-Identifier: 0BSD
+set -eu
+
+if [ -r "@PASSWORD_FILE@" ]; then
+  SONAR_JDBC_PASSWORD=$(cat "@PASSWORD_FILE@")
+  export SONAR_JDBC_PASSWORD
+fi
+
+exec "@LAUNCHER@" console
