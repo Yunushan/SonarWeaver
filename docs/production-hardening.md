@@ -157,4 +157,17 @@ Synchronize time on all server, database, proxy, and cluster nodes. Keep a chang
 - Protect the default branch and require review for deployment changes.
 - Preserve third-party license notices when mirroring artifacts.
 
+## Configuration management
+
+For native Linux VM or bare-metal fleets, the optional SonarWeaver Ansible path
+provides idempotent host preparation, a controlled release change gate, and
+post-deployment API verification. Treat its inventory as sensitive operational
+configuration: store production inventories and Vault material outside this
+repository, use a least-privilege automation identity, and retain playbook logs
+according to the organisation's change-record policy.
+
+Ansible is not the Kubernetes release controller. For RKE2/K3s, commit reviewed
+Helm values and use GitOps reconciliation; use Ansible only for node and
+supporting-infrastructure configuration where it has clear ownership.
+
 Continue with [backup, upgrade, and rollback](backup-upgrade.md) before accepting production traffic.

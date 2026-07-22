@@ -1,0 +1,121 @@
+---
+- name: Assert native production database inputs
+  ansible.builtin.assert:
+    that:
+      - sonarweaver_edition in ['community', 'server-latest', 'server-lta']
+      - sonarweaver_version | length > 0
+      - sonarweaver_jdbc_url | length > 0
+      - sonarweaver_jdbc_user | length > 0
+      - sonarweaver_jdbc_password_file | length > 0
+    fail_msg: >-
+      The native Ansible path is production-only: provide a pinned version and
+      external JDBC URL, user, and protected password-file path.
+
+- name: Check the protected JDBC password file
+  ansible.builtin.stat:
+    path: "{{ sonarweaver_jdbc_password_file }}"
+  register: _sonarweaver_jdbc_password
+  no_log: true
+
+- name: Assert the JDBC password file is regular and owner-readable only
+  ansible.builtin.assert:
+    that:
+      - _sonarweaver_jdbc_password.stat.exists
+      - _sonarweaver_jdbc_password.stat.isreg
+      - (_sonarweaver_jdbc_password.stat.mode | int(base=8)) <= 0o640
+    fail_msg: >-
+      sonarweaver_jdbc_password_file must be a protected regular file on the
+      managed host; create it through the approved secret-management workflow.
+  no_log: true
+
+- name: Read the active SonarQube release path
+  ansible.builtin.command:
+    argv:
+      - readlink
+      - -f
+      - "{{ sonarweaver_install_root }}/current"
+  changed_when: false
+  failed_when: false
+  register: _sonarweaver_active_release
+
+- name: Determine whether this run changes the active release
+  ansible.builtin.set_fact:
+    _sonarweaver_release_change: >-
+      {{ _sonarweaver_active_release.rc != 0 or
+         (_sonarweaver_active_release.stdout | trim) !=
+         (sonarweaver_install_root ~ '/versions/' ~ sonarweaver_version) }}
+
+- name: Require an explicit approved backup before an upgrade
+  ansible.builtin.assert:
+    that:
+      - sonarweaver_upgrade_approved | bool
+      - sonarweaver_backup_verified | bool
+    fail_msg: >-
+      This version change requires an approved maintenance window and a tested
+      pre-upgrade database backup. Set both approval variables only after that
+      work is complete.
+  when:
+    - _sonarweaver_active_release.rc == 0
+    - _sonarweaver_release_change | bool
+
+- name: Create installer staging directories
+  ansible.builtin.file:
+    path: "{{ sonarweaver_staging_dir }}/{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - config
+    - deployments/native/linux
+
+- name: Stage the reviewed native installer files
+  ansible.builtin.copy:
+    src: "{{ sonarweaver_source_dir }}/{{ item.source }}"
+    dest: "{{ sonarweaver_staging_dir }}/{{ item.destination }}"
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - source: config/versions.env
+      destination: config/versions.env
+      mode: '0644'
+    - source: deployments/native/common.sh
+      destination: deployments/native/common.sh
+      mode: '0755'
+    - source: deployments/native/linux/install.sh
+      destination: deployments/native/linux/install.sh
+      mode: '0755'
+    - source: deployments/native/linux/sonarqube.service.in
+      destination: deployments/native/linux/sonarqube.service.in
+      mode: '0644'
+    - source: deployments/native/linux/start-wrapper.in
+      destination: deployments/native/linux/start-wrapper.in
+      mode: '0644'
+
+- name: Install or stage the requested pinned SonarQube release
+  ansible.builtin.command:
+    argv:
+      - "{{ sonarweaver_staging_dir }}/deployments/native/linux/install.sh"
+      - --version
+      - "{{ sonarweaver_version }}"
+      - --install-root
+      - "{{ sonarweaver_install_root }}"
+      - --data-dir
+      - "{{ sonarweaver_data_dir }}"
+      - --logs-dir
+      - "{{ sonarweaver_logs_dir }}"
+      - --temp-dir
+      - "{{ sonarweaver_temp_dir }}"
+      - --service-user
+      - "{{ sonarweaver_service_user }}"
+      - --jdbc-url
+      - "{{ sonarweaver_jdbc_url }}"
+      - --jdbc-user
+      - "{{ sonarweaver_jdbc_user }}"
+      - --jdbc-password-file
+      - "{{ sonarweaver_jdbc_password_file }}"
+      - --no-start
+  when: _sonarweaver_release_change | bool
+  changed_when: _sonarweaver_release_change | bool
+  no_log: true

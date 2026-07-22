@@ -1,0 +1,38 @@
+---
+- name: Ensure the SonarQube systemd service is enabled and running
+  ansible.builtin.systemd_service:
+    name: sonarqube.service
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Wait for SonarQube to report system status UP
+  ansible.builtin.uri:
+    url: "{{ sonarweaver_health_url }}"
+    method: GET
+    return_content: true
+    status_code: 200
+  register: _sonarweaver_health
+  until: _sonarweaver_health.json.status | default('') == 'UP'
+  retries: "{{ sonarweaver_health_retries }}"
+  delay: "{{ sonarweaver_health_delay }}"
+  changed_when: false
+
+- name: Read the active kernel limits
+  ansible.builtin.command:
+    argv:
+      - sysctl
+      - -n
+      - "{{ item }}"
+  changed_when: false
+  loop:
+    - vm.max_map_count
+    - fs.file-max
+  register: _sonarweaver_kernel_limits
+
+- name: Assert the active kernel limits meet SonarQube requirements
+  ansible.builtin.assert:
+    that:
+      - (_sonarweaver_kernel_limits.results[0].stdout | int) >= sonarweaver_required_vm_max_map_count | int
+      - (_sonarweaver_kernel_limits.results[1].stdout | int) >= sonarweaver_required_fs_file_max | int
+    fail_msg: The active host kernel limits do not meet the configured SonarQube minimums.

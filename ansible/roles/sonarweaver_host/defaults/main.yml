@@ -1,0 +1,19 @@
+---
+sonarweaver_service_user: sonarqube
+sonarweaver_service_group: sonarqube
+sonarweaver_install_root: /opt/sonarqube
+sonarweaver_data_dir: /var/lib/sonarqube/data
+sonarweaver_logs_dir: /var/log/sonarqube
+sonarweaver_temp_dir: /var/lib/sonarqube/temp
+sonarweaver_config_dir: /etc/sonarqube
+sonarweaver_java_major: 21
+sonarweaver_manage_java: false
+sonarweaver_java_package: ""
+sonarweaver_java_packages_by_os_family:
+  Debian: "openjdk-21-jre-headless"
+  RedHat: "java-21-openjdk-headless"
+  Suse: "java-21-openjdk-headless"
+sonarweaver_required_vm_max_map_count: 524288
+sonarweaver_required_fs_file_max: 131072
+sonarweaver_required_nofile: 131072
+sonarweaver_required_nproc: 8192

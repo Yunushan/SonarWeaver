@@ -1,0 +1,7 @@
+---
+sonarweaver_proxy_enabled: false
+sonarweaver_proxy_server_name: ""
+sonarweaver_proxy_tls_certificate: ""
+sonarweaver_proxy_tls_certificate_key: ""
+sonarweaver_proxy_client_max_body_size: 100m
+sonarweaver_proxy_upstream_url: http://127.0.0.1:9000

@@ -60,6 +60,37 @@ jobs:
       - name: Lint YAML
         run: yamllint .
 
+  ansible:
+    name: Ansible static checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install Ansible validators
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install 'ansible-core>=2.20,<2.21' 'ansible-lint>=25.0.0,<26.0.0' 'molecule>=25.0.0,<26.0.0'
+          ansible-galaxy collection install -r ansible/requirements.yml
+
+      - name: Lint Ansible content
+        run: ansible-lint ansible
+
+      - name: Check Ansible playbook syntax
+        run: ansible-playbook --syntax-check -i ansible/inventory/production.example.yml ansible/playbooks/site.yml
+
+      - name: Check Molecule scenario syntax
+        working-directory: ansible
+        run: molecule syntax
+
   powershell:
     name: Windows PowerShell 5.1
     runs-on: windows-latest

@@ -1,0 +1,11 @@
+---
+# Copy this file outside the repository and replace the example host name.
+# Keep database passwords and TLS private keys in an approved secret manager.
+all:
+  children:
+    sonarqube:
+      hosts:
+        sonar.example.internal:
+          ansible_user: automation
+          # An SSH key, SSO, or an Ansible Vault-encrypted connection secret
+          # belongs in an inventory outside this repository.

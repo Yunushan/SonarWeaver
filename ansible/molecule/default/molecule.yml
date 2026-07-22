@@ -1,0 +1,14 @@
+---
+dependency:
+  name: galaxy
+driver:
+  name: delegated
+platforms: []
+provisioner:
+  name: ansible
+verifier:
+  name: ansible
+scenario:
+  test_sequence:
+    - dependency
+    - syntax

@@ -12,6 +12,7 @@ This guide helps choose and prepare a SonarWeaver deployment. Read [the support 
 | Docker Compose | Fast, repeatable single-host deployment | Compose is not a cluster or HA platform |
 | RKE2 | Production-oriented Kubernetes already operated by the organization | Requires cluster, storage, ingress, secret, and node-kernel administration |
 | K3s | Edge, lab, or smaller Kubernetes environment | Default local storage is node-local and not HA |
+| Ansible native Linux | Managed VM or bare-metal fleet with audited, repeatable change control | Requires an Ansible control plane and secret-management integration |
 
 Generic Unix is preflight-only because SonarSource does not publish a general FreeBSD, Solaris, AIX, HP-UX, or other Unix support statement.
 
@@ -105,6 +106,25 @@ sonar.jdbc.username=sonarqube
 SonarWeaver reads the password from `--jdbc-password-file` and exposes it to the process at runtime as `SONAR_JDBC_PASSWORD`; it does not need to write the password into `sonar.properties`. Limit file permissions and encrypt sensitive SonarQube properties where applicable.
 
 Secret input files must contain the exact secret bytes without a trailing CR or LF. Generate a simple file with `printf '%s' "$VALUE" > file` or configure the secret manager to omit line endings; do not use `echo`.
+
+### Managed native Linux with Ansible
+
+The optional [Ansible path](../ansible/README.md) is the preferred SonarWeaver
+interface for a managed Linux VM or bare-metal fleet. It is production-only:
+it requires a pinned release, external JDBC settings, and an existing protected
+password file on each target. It manages the dedicated identity, persistent
+kernel limits, installation staging, optional NGINX TLS proxy, service start,
+and API health check.
+
+Use an external secret manager or Ansible Vault to supply only the password
+file path and related non-secret connection metadata. Do not place a password
+in inventory or host variables. Ansible intentionally requires two explicit
+operator assertions before an existing release is changed, after the
+maintenance window and restore-tested backup have been completed.
+
+For Kubernetes, Helm plus GitOps should own the SonarQube release. Ansible can
+prepare worker-node prerequisites but must not become a competing source of
+truth for Helm resources.
 
 ## Docker Compose
 

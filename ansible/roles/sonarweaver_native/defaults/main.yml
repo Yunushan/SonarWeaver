@@ -1,0 +1,10 @@
+---
+sonarweaver_source_dir: "{{ playbook_dir }}/../.."
+sonarweaver_staging_dir: /usr/local/lib/sonarweaver-installer
+sonarweaver_edition: community
+sonarweaver_version: ""
+sonarweaver_jdbc_url: ""
+sonarweaver_jdbc_user: ""
+sonarweaver_jdbc_password_file: ""
+sonarweaver_upgrade_approved: false
+sonarweaver_backup_verified: false

@@ -41,6 +41,12 @@ compose.override.yml
 values.local.yaml
 values.local.yml
 
+# Ansible inventories, Vault files, and retry artifacts. Commit only examples.
+ansible/inventory/*.yml
+!ansible/inventory/*.example.yml
+ansible/group_vars/**/*.vault.yml
+*.retry
+
 # Test and tooling output
 .cache/
 .pytest_cache/

@@ -1,0 +1,20 @@
+---
+# This value deliberately mirrors config/versions.env. CI rejects a mismatch.
+sonarweaver_version: "26.7.0.124771"
+sonarweaver_edition: community
+sonarweaver_jdbc_url: ""
+sonarweaver_jdbc_user: ""
+
+# Point to a protected, pre-provisioned password file on the managed host, or
+# pass this value at runtime from an approved secret manager integration.
+sonarweaver_jdbc_password_file: ""
+
+# Production upgrades require both assertions. They force an operator to make
+# the backup/restore and maintenance-window decisions outside the playbook.
+sonarweaver_upgrade_approved: false
+sonarweaver_backup_verified: false
+
+sonarweaver_proxy_enabled: false
+sonarweaver_proxy_server_name: ""
+sonarweaver_proxy_tls_certificate: ""
+sonarweaver_proxy_tls_certificate_key: ""

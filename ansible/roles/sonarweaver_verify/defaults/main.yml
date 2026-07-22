@@ -1,0 +1,4 @@
+---
+sonarweaver_health_url: http://127.0.0.1:9000/api/system/status
+sonarweaver_health_retries: 60
+sonarweaver_health_delay: 5

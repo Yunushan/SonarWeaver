@@ -1,0 +1,34 @@
+---
+- name: Assert TLS proxy inputs
+  ansible.builtin.assert:
+    that:
+      - sonarweaver_proxy_server_name | length > 0
+      - sonarweaver_proxy_tls_certificate | length > 0
+      - sonarweaver_proxy_tls_certificate_key | length > 0
+    fail_msg: >-
+      Set the server name and existing certificate/key paths before enabling the
+      optional NGINX TLS proxy role.
+  when: sonarweaver_proxy_enabled | bool
+
+- name: Install NGINX when the optional proxy is enabled
+  ansible.builtin.package:
+    name: nginx
+    state: present
+  when: sonarweaver_proxy_enabled | bool
+
+- name: Render the SonarQube NGINX TLS virtual host
+  ansible.builtin.template:
+    src: sonarweaver.conf.j2
+    dest: /etc/nginx/conf.d/sonarweaver.conf
+    owner: root
+    group: root
+    mode: '0644'
+  when: sonarweaver_proxy_enabled | bool
+  notify: Reload nginx
+
+- name: Enable and start NGINX when the optional proxy is enabled
+  ansible.builtin.service:
+    name: nginx
+    enabled: true
+    state: started
+  when: sonarweaver_proxy_enabled | bool
