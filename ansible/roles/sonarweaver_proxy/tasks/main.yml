@@ -160,6 +160,7 @@
           '--non-interactive', '--keep-until-expiring'
         ] + (['--staging'] if (sonarweaver_proxy_letsencrypt_staging | bool) else [])
       }}
+    creates: "{{ _sonarweaver_proxy_tls_certificate }}"
   when:
     - sonarweaver_proxy_enabled | bool
     - sonarweaver_proxy_letsencrypt_enabled | bool
