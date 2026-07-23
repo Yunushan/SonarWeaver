@@ -450,6 +450,7 @@ jobs:
           exit-code: '1'
           ignore-unfixed: true
           severity: CRITICAL
+          trivyignores: .trivyignore.yaml
 
   image-sbom:
     name: Image SBOM (${{ matrix.name }})

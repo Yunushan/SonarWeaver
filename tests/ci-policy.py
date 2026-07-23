@@ -28,6 +28,8 @@ if "pip install -r requirements-ci.txt" not in workflow:
     failures.append("CI must install its Python tooling from the reviewed requirements lock.")
 if "upload-artifact-retention: 90" not in workflow:
     failures.append("CI must retain generated SBOM artifacts for 90 days rather than relying on repository defaults.")
+if "trivyignores: .trivyignore.yaml" not in workflow:
+    failures.append("Trivy must use the reviewed, path-scoped exception file.")
 if "grep -Eq '^kind: (Deployment|StatefulSet)$'" not in workflow or "grep -q '^kind: Service$'" not in workflow:
     failures.append("Helm CI must verify that the pinned chart renders its workload and service resources.")
 if (
@@ -112,6 +114,10 @@ for required in (
 gitleaks_config = ROOT / ".gitleaks.toml"
 if not gitleaks_config.exists() or "679F1EE92B19609DE816FDE81DB198F93525EC1A" not in gitleaks_config.read_text(encoding="utf-8"):
     failures.append("Gitleaks must document the public SonarSource signing-key fingerprint false-positive exception.")
+
+trivy_ignores = ROOT / ".trivyignore.yaml"
+if not trivy_ignores.exists() or "CVE-2025-68121" not in trivy_ignores.read_text(encoding="utf-8") or "usr/local/bin/gosu" not in trivy_ignores.read_text(encoding="utf-8"):
+    failures.append("Trivy must retain the scoped, expiring gosu exception for CVE-2025-68121.")
 
 kubernetes_values = (ROOT / "deployments" / "kubernetes" / "common" / "values.yaml").read_text(encoding="utf-8")
 for required in (

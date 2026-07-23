@@ -1,0 +1,10 @@
+# Temporary, path-scoped exception for the official PostgreSQL image.
+# gosu is used only as a local privilege-drop helper; SonarWeaver does not use
+# it for TLS connections, so the crypto/tls session-resumption flaw is not
+# reachable. Re-evaluate when the upstream image refreshes gosu.
+vulnerabilities:
+  - id: CVE-2025-68121
+    paths:
+      - usr/local/bin/gosu
+    expired_at: 2026-08-23
+    statement: gosu is a local privilege-drop helper and does not establish TLS connections.
