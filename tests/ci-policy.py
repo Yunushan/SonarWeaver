@@ -51,10 +51,10 @@ for required in (
         failures.append(f"CI must prove a PostgreSQL backup restores known data: {required}")
 
 for requirement in (
-    "ansible-core==2.20.2",
-    "ansible-lint==25.12.0",
-    "molecule==25.12.0",
-    "zizmor==1.18.0",
+    "ansible-core==2.21.2",
+    "ansible-lint==26.6.0",
+    "molecule==26.6.0",
+    "zizmor==1.28.0",
 ):
     if requirement not in ci_requirements:
         failures.append(f"CI requirement must remain exactly pinned: {requirement}")
