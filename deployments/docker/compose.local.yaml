@@ -10,11 +10,19 @@ services:
       SONAR_JDBC_USERNAME: sonarqube
 
   db:
-    image: ${POSTGRES_IMAGE:-postgres@sha256:3a82e1f56c8f0f5616a11103ac3d47e632c3938698946a7ad26da0df1334744a}
+    image: ${POSTGRES_IMAGE:-postgres@sha256:a426e44bac0b759c95894d68e1a0ac03ecc20b619f498a91aae373bf06d8508d}
     restart: unless-stopped
     read_only: true
     security_opt:
       - no-new-privileges:true
+    # The official entrypoint needs these only to initialize the volume and
+    # transition from root to the postgres user; drop every other capability.
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
     environment:
       POSTGRES_DB: sonarqube
       POSTGRES_USER: sonarqube

@@ -13,8 +13,10 @@ $ErrorActionPreference = 'Stop'
 $ScriptDirectory = $PSScriptRoot
 
 function Set-DockerSecretAcl {
+    [CmdletBinding(SupportsShouldProcess)]
     param([string]$Path)
 
+    if (-not $PSCmdlet.ShouldProcess($Path, 'apply restrictive Docker JDBC secret ACL')) { return }
     $currentSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
     & icacls.exe $Path /inheritance:r /grant:r `
         "*$currentSid`:(R)" `
@@ -24,6 +26,11 @@ function Set-DockerSecretAcl {
 }
 
 function Confirm-ProductionUpgrade {
+    param(
+        [switch]$UpgradeApproved,
+        [switch]$BackupVerified
+    )
+
     $envContent = Get-Content -LiteralPath '.env' -Raw
     $desiredMatch = [regex]::Match($envContent, '(?m)^SONARQUBE_IMAGE=([^\r\n]+)$')
     if (-not $desiredMatch.Success) { throw 'SONARQUBE_IMAGE is missing from deployments/docker/.env.' }
@@ -79,7 +86,7 @@ try {
         if ((Get-Content -LiteralPath '.env' -Raw) -match 'postgresql\.example\.invalid') {
             throw 'Set the external SONAR_JDBC_URL in deployments/docker/.env first.'
         }
-        Confirm-ProductionUpgrade
+        Confirm-ProductionUpgrade -UpgradeApproved:$UpgradeApproved -BackupVerified:$BackupVerified
         & docker compose --env-file .env -f compose.yaml config --quiet
         if ($LASTEXITCODE -ne 0) { throw 'Docker Compose validation failed.' }
         & docker compose --env-file .env -f compose.yaml up -d

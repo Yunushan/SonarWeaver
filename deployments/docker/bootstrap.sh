@@ -86,7 +86,7 @@ if [ ! -s secrets/jdbc_password ]; then
     umask 077
     od -An -N36 -tx1 /dev/urandom | tr -d ' \n' >secrets/jdbc_password
   fi
-  chmod 600 secrets/jdbc_password
+  chmod 644 secrets/jdbc_password
   printf '%s\n' 'Created a random database password in deployments/docker/secrets/.'
 fi
 secret_size=$(wc -c <secrets/jdbc_password | awk '{print $1}')
@@ -95,7 +95,10 @@ if [ "$secret_size" != "$flat_size" ]; then
   printf '%s\n' 'secrets/jdbc_password must not contain line endings; create it with printf, not echo.' >&2
   exit 1
 fi
-chmod 600 secrets/jdbc_password
+# Compose file-backed secrets preserve the source-file mode. The parent
+# directory remains 0700, while the non-root SonarQube process needs read
+# access after Docker mounts the file inside the container.
+chmod 644 secrets/jdbc_password
 
 if [ "$(uname -s 2>/dev/null || true)" = Linux ]; then
   current_map_count=$(sysctl -n vm.max_map_count 2>/dev/null || printf '0')

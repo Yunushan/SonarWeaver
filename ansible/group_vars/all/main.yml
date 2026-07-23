@@ -18,3 +18,7 @@ sonarweaver_proxy_enabled: false
 sonarweaver_proxy_server_name: ""
 sonarweaver_proxy_tls_certificate: ""
 sonarweaver_proxy_tls_certificate_key: ""
+sonarweaver_proxy_letsencrypt_enabled: false
+sonarweaver_proxy_letsencrypt_email: ""
+sonarweaver_proxy_letsencrypt_webroot: /var/lib/sonarweaver-acme
+sonarweaver_proxy_letsencrypt_staging: false

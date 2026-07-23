@@ -90,7 +90,7 @@ Open an elevated PowerShell only for steps that need service or ACL changes:
 .\bin\sonarweaver.ps1 status windows
 ```
 
-The example uses disposable H2 evaluation mode. For production, omit `-Evaluation` and pass `-JdbcUrl`, `-JdbcUser`, and `-JdbcPasswordFile`.
+The example uses disposable H2 evaluation mode. For production, omit `-Evaluation` and pass `-JdbcUrl`, `-JdbcUser`, and `-JdbcPasswordFile`. When a managed production installation already exists, complete the approved maintenance and isolated restore workflow first, then pass `-UpgradeApproved -BackupVerified`. Linux and macOS use the equivalent `--upgrade-approved --backup-verified` options. These are acknowledgement gates, not restore evidence.
 
 Use a supported JDK 21 or 25, the low-privilege managed startup identity, and explicit NTFS permissions. SonarWeaver registers its startup task under Windows Local Service. Firewall changes should be opt-in and limited to the intended reverse proxy or administration network.
 
@@ -163,6 +163,13 @@ SonarSource warns against bind mounts for those paths because they can prevent c
 
 For production, point SonarQube to an independently operated supported database. A database container in the same Compose project is a convenience deployment, not the production reference architecture.
 
+On POSIX hosts, the local `secrets/` directory is mode `0700`. Its JDBC
+password file is mode `0644` because Docker Compose file-backed secrets
+preserve the host file mode and the official SonarQube container runs as a
+non-root user. Do not loosen the directory permission, copy the password
+outside that directory, or use a world-accessible project directory. The
+Windows bootstrap instead applies restrictive NTFS ACLs to the secret file.
+
 If a production bootstrap would replace the image of an existing SonarQube
 container, it stops until both `--upgrade-approved` and `--backup-verified`
 are supplied. Use those acknowledgements only after completing the upgrade and
@@ -230,11 +237,32 @@ Replace `rke2` with `k3s` for a K3s context. This command uses disposable H2 eva
   --node-prerequisites-ready
 ```
 
+When that release already exists, complete the approved maintenance and
+isolated database-restore workflow first, then add
+`--upgrade-approved --backup-verified`. The installer verifies that the Helm
+release exists before it creates or changes production resources. These flags
+record an operator acknowledgement; they do not replace restore evidence.
+
 For production ingress, add `--hostname`, `--ingress-class`,
 `--ingress-namespace`, and `--tls-secret`; TLS is mandatory. The installer
 labels the selected ingress-controller namespace to permit traffic only from
 that namespace. The published official chart package is pinned to `2026.3.1`;
 its Server `appVersion` is also `2026.3.1`.
+
+To use an existing certificate, pre-create the named `--tls-secret`. To opt in
+to Let's Encrypt through an existing cert-manager installation, keep
+`--tls-secret sonar-example-com-tls` as the target Secret name and add
+`--cert-manager-cluster-issuer letsencrypt-production` to the complete
+production invocation above.
+
+The installer verifies the ClusterIssuer and adds the standard
+`cert-manager.io/cluster-issuer` Ingress annotation; cert-manager creates and
+renews the TLS Secret. It never installs cert-manager, creates an ACME account,
+or changes DNS/firewall rules. Test a staging issuer first, ensure the hostname
+is publicly reachable on the selected HTTP-01 ingress class (or that the
+ClusterIssuer is correctly configured for DNS-01), and allow the chosen ingress
+controller to reach cert-manager's temporary solver Pods under the cluster's
+NetworkPolicy design. Do not have another process manage the same TLS Secret.
 
 Use common settings together with the matching distribution overlay:
 

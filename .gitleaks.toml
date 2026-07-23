@@ -1,0 +1,7 @@
+title = "SonarWeaver Gitleaks configuration"
+
+[allowlist]
+description = "The pinned SonarSource OpenPGP fingerprint is public key metadata, not a credential."
+regexes = [
+  '''679F1EE92B19609DE816FDE81DB198F93525EC1A''',
+]

@@ -70,6 +70,11 @@ Change the initial administrator password immediately. Prefer centralized authen
 Do not expose port 9000 directly to the public internet. Terminate TLS at a hardened reverse proxy, Ingress, or Gateway and limit direct backend access.
 
 - Use a trusted certificate and a modern TLS policy.
+- Treat automatic certificate issuance as an explicit infrastructure choice:
+  use a pre-approved cert-manager ClusterIssuer for Kubernetes or a pre-approved
+  Certbot installation for managed NGINX hosts, validate a staging issuance and
+  renewal first, and retain ownership of DNS and firewall changes outside this
+  toolkit.
 - Preserve the correct forwarded host, scheme, and client information.
 - Allow only required ingress from users, scanners, and integration callbacks.
 - Allow only required egress to the database, identity provider, DevOps platforms, update/plugin sources, SMTP, and monitoring systems.
@@ -88,9 +93,9 @@ Docker deployments should use named volumes for data, logs, and extensions. K3s 
 
 - Pin the official image by immutable digest; retain its reviewed version in the release record.
 - Scan the exact image and configuration used for the release.
-- Keep Compose secret files owner-readable only; the bootstrap enforces mode `0600` for its JDBC password file.
-- Do not add an unreviewed package manager or debugging tools to the runtime image.
-- Drop unnecessary Linux capabilities and prevent privilege escalation.
+  - Keep the Compose `secrets/` directory restricted to its owner (`0700`). Docker Compose preserves the source mode of file-backed secrets, so the JDBC password file is deliberately `0644` to let SonarQube's non-root process read its mounted secret; do not loosen the directory ACL or place other files there.
+  - Do not add an unreviewed package manager or debugging tools to the runtime image.
+  - Drop unnecessary Linux capabilities and prevent privilege escalation. SonarQube drops all capabilities; the evaluation PostgreSQL entrypoint drops all except `CHOWN`, `SETGID`, and `SETUID`, which it requires only to initialize its volume and switch to the `postgres` user.
 - Use read-only root filesystems where compatible, while supplying writable data, extension, log, and temporary paths.
 - Define CPU/memory requests and limits based on measured load.
 
@@ -203,8 +208,9 @@ submits it to a disposable Kubernetes API with server-side dry-run validation.
 Its Kind node image is also pinned by digest to keep the CI Kubernetes version
 and image identity reproducible.
 
-CI also publishes an SPDX SBOM for each reviewed Compose image. Retain the
-SBOMs with the release/change record so vulnerability findings can be evaluated
+CI publishes an SPDX SBOM for each reviewed Compose image and retains the CI
+artifact for 90 days. Retain the SBOMs with the release/change record so
+vulnerability findings can be evaluated
 against the exact deployed digest.
 
 Run the production verification command from an approved administration host

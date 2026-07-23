@@ -3,12 +3,36 @@
   ansible.builtin.assert:
     that:
       - sonarweaver_proxy_server_name | length > 0
+    fail_msg: >-
+      Set the server name before enabling the optional NGINX TLS proxy role.
+  when: sonarweaver_proxy_enabled | bool
+
+- name: Assert custom TLS proxy inputs
+  ansible.builtin.assert:
+    that:
       - sonarweaver_proxy_tls_certificate | length > 0
       - sonarweaver_proxy_tls_certificate_key | length > 0
     fail_msg: >-
-      Set the server name and existing certificate/key paths before enabling the
-      optional NGINX TLS proxy role.
-  when: sonarweaver_proxy_enabled | bool
+      Set existing certificate/key paths, or explicitly enable the optional
+      Let's Encrypt flow before enabling the NGINX TLS proxy role.
+  when:
+    - sonarweaver_proxy_enabled | bool
+    - not (sonarweaver_proxy_letsencrypt_enabled | bool)
+
+- name: Assert Let's Encrypt proxy inputs
+  ansible.builtin.assert:
+    that:
+      - sonarweaver_proxy_letsencrypt_email | length > 0
+      - sonarweaver_proxy_tls_certificate | length == 0
+      - sonarweaver_proxy_tls_certificate_key | length == 0
+      - sonarweaver_proxy_letsencrypt_webroot is match('^/')
+    fail_msg: >-
+      Let's Encrypt requires a registration email, an absolute ACME webroot,
+      and no custom certificate/key paths. Provision DNS and public HTTP-01
+      reachability before enabling this option.
+  when:
+    - sonarweaver_proxy_enabled | bool
+    - sonarweaver_proxy_letsencrypt_enabled | bool
 
 - name: Install NGINX when the optional proxy is enabled
   ansible.builtin.package:
@@ -16,13 +40,183 @@
     state: present
   when: sonarweaver_proxy_enabled | bool
 
+- name: Inspect the managed Let's Encrypt renewal timer
+  ansible.builtin.stat:
+    path: /etc/systemd/system/sonarweaver-certbot-renew.timer
+  register: _sonarweaver_proxy_letsencrypt_timer
+  when:
+    - sonarweaver_proxy_enabled | bool
+    - not (sonarweaver_proxy_letsencrypt_enabled | bool)
+
+- name: Stop the managed Let's Encrypt renewal timer when using custom TLS
+  ansible.builtin.systemd:
+    name: sonarweaver-certbot-renew.timer
+    enabled: false
+    state: stopped
+  when:
+    - sonarweaver_proxy_enabled | bool
+    - not (sonarweaver_proxy_letsencrypt_enabled | bool)
+    - _sonarweaver_proxy_letsencrypt_timer.stat.exists
+
+- name: Remove managed Let's Encrypt artifacts when using custom TLS
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/nginx/conf.d/sonarweaver-acme.conf
+    - /usr/local/libexec/sonarweaver-certbot-deploy-hook
+    - /etc/systemd/system/sonarweaver-certbot-renew.service
+    - /etc/systemd/system/sonarweaver-certbot-renew.timer
+  when:
+    - sonarweaver_proxy_enabled | bool
+    - not (sonarweaver_proxy_letsencrypt_enabled | bool)
+  notify:
+    - Reload nginx
+    - Reload systemd
+
+- name: Verify Certbot is available for the optional Let's Encrypt flow
+  ansible.builtin.command:
+    argv:
+      - certbot
+      - --version
+  changed_when: false
+  when:
+    - sonarweaver_proxy_enabled | bool
+    - sonarweaver_proxy_letsencrypt_enabled | bool
+
+- name: Create the Let's Encrypt HTTP-01 webroot
+  ansible.builtin.file:
+    path: "{{ sonarweaver_proxy_letsencrypt_webroot }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  when:
+    - sonarweaver_proxy_enabled | bool
+    - sonarweaver_proxy_letsencrypt_enabled | bool
+
+- name: Render the Let's Encrypt HTTP-01 and redirect virtual host
+  ansible.builtin.template:
+    src: sonarweaver-acme.conf.j2
+    dest: /etc/nginx/conf.d/sonarweaver-acme.conf
+    owner: root
+    group: root
+    mode: '0644'
+  when:
+    - sonarweaver_proxy_enabled | bool
+    - sonarweaver_proxy_letsencrypt_enabled | bool
+  notify: Reload nginx
+
+- name: Validate the NGINX HTTP-01 configuration before certificate issuance
+  ansible.builtin.command:
+    argv:
+      - nginx
+      - -t
+  changed_when: false
+  when:
+    - sonarweaver_proxy_enabled | bool
+    - sonarweaver_proxy_letsencrypt_enabled | bool
+
+- name: Start NGINX for the Let's Encrypt HTTP-01 challenge
+  ansible.builtin.service:
+    name: nginx
+    enabled: true
+    state: started
+  when:
+    - sonarweaver_proxy_enabled | bool
+    - sonarweaver_proxy_letsencrypt_enabled | bool
+
+- name: Derive the effective TLS certificate paths
+  ansible.builtin.set_fact:
+    _sonarweaver_proxy_tls_certificate: >-
+      {{ '/etc/letsencrypt/live/' ~ sonarweaver_proxy_server_name ~ '/fullchain.pem'
+         if (sonarweaver_proxy_letsencrypt_enabled | bool)
+         else sonarweaver_proxy_tls_certificate }}
+    _sonarweaver_proxy_tls_certificate_key: >-
+      {{ '/etc/letsencrypt/live/' ~ sonarweaver_proxy_server_name ~ '/privkey.pem'
+         if (sonarweaver_proxy_letsencrypt_enabled | bool)
+         else sonarweaver_proxy_tls_certificate_key }}
+  when: sonarweaver_proxy_enabled | bool
+
+- name: Inspect the existing Let's Encrypt certificate
+  ansible.builtin.stat:
+    path: "{{ _sonarweaver_proxy_tls_certificate }}"
+    follow: true
+  register: _sonarweaver_proxy_letsencrypt_certificate
+  no_log: true
+  when:
+    - sonarweaver_proxy_enabled | bool
+    - sonarweaver_proxy_letsencrypt_enabled | bool
+
+- name: Obtain the initial Let's Encrypt certificate through HTTP-01
+  ansible.builtin.command:
+    argv: >-
+      {{
+        [
+          'certbot', 'certonly', '--webroot', '--webroot-path',
+          sonarweaver_proxy_letsencrypt_webroot, '--domain',
+          sonarweaver_proxy_server_name, '--email',
+          sonarweaver_proxy_letsencrypt_email, '--agree-tos', '--no-eff-email',
+          '--non-interactive', '--keep-until-expiring'
+        ] + (['--staging'] if (sonarweaver_proxy_letsencrypt_staging | bool) else [])
+      }}
+  when:
+    - sonarweaver_proxy_enabled | bool
+    - sonarweaver_proxy_letsencrypt_enabled | bool
+    - not _sonarweaver_proxy_letsencrypt_certificate.stat.exists
+
+- name: Install the Let's Encrypt NGINX reload hook
+  ansible.builtin.template:
+    src: sonarweaver-certbot-deploy-hook.sh.j2
+    dest: /usr/local/libexec/sonarweaver-certbot-deploy-hook
+    owner: root
+    group: root
+    mode: '0750'
+  when:
+    - sonarweaver_proxy_enabled | bool
+    - sonarweaver_proxy_letsencrypt_enabled | bool
+
+- name: Install the Let's Encrypt renewal service
+  ansible.builtin.template:
+    src: sonarweaver-certbot-renew.service.j2
+    dest: /etc/systemd/system/sonarweaver-certbot-renew.service
+    owner: root
+    group: root
+    mode: '0644'
+  when:
+    - sonarweaver_proxy_enabled | bool
+    - sonarweaver_proxy_letsencrypt_enabled | bool
+  notify: Reload systemd
+
+- name: Install the Let's Encrypt renewal timer
+  ansible.builtin.template:
+    src: sonarweaver-certbot-renew.timer.j2
+    dest: /etc/systemd/system/sonarweaver-certbot-renew.timer
+    owner: root
+    group: root
+    mode: '0644'
+  when:
+    - sonarweaver_proxy_enabled | bool
+    - sonarweaver_proxy_letsencrypt_enabled | bool
+  notify: Reload systemd
+
+- name: Enable the Let's Encrypt renewal timer
+  ansible.builtin.systemd:
+    name: sonarweaver-certbot-renew.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+  when:
+    - sonarweaver_proxy_enabled | bool
+    - sonarweaver_proxy_letsencrypt_enabled | bool
+
 - name: Inspect TLS certificate and key files
   ansible.builtin.stat:
     path: "{{ item }}"
     follow: true
   loop:
-    - "{{ sonarweaver_proxy_tls_certificate }}"
-    - "{{ sonarweaver_proxy_tls_certificate_key }}"
+    - "{{ _sonarweaver_proxy_tls_certificate }}"
+    - "{{ _sonarweaver_proxy_tls_certificate_key }}"
   register: _sonarweaver_proxy_tls_files
   no_log: true
   when: sonarweaver_proxy_enabled | bool

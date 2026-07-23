@@ -1,0 +1,9 @@
+# Managed by SonarWeaver Ansible.
+[Unit]
+Description=Renew SonarWeaver Let's Encrypt certificate
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/env certbot renew --quiet --deploy-hook /usr/local/libexec/sonarweaver-certbot-deploy-hook

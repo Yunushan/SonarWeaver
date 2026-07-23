@@ -20,6 +20,8 @@ EVALUATION=false
 NO_START=false
 DRY_RUN=false
 APPLY_LIMITS=false
+UPGRADE_APPROVED=false
+BACKUP_VERIFIED=false
 LABEL=io.github.yunushan.sonarweaver
 
 usage() {
@@ -38,6 +40,8 @@ Options:
   --evaluation                  Use embedded H2 (evaluation only)
   --apply-limits                Apply current-session kernel file limits with sudo
   --no-start                    Install without loading the LaunchAgent
+  --upgrade-approved            Acknowledge the approved production upgrade plan
+  --backup-verified             Acknowledge the isolated restore verification
   --dry-run                     Validate and print the plan only
   -h, --help                    Show this help
 
@@ -61,6 +65,8 @@ while [ "$#" -gt 0 ]; do
     --evaluation) EVALUATION=true; shift ;;
     --apply-limits) APPLY_LIMITS=true; shift ;;
     --no-start) NO_START=true; shift ;;
+    --upgrade-approved) UPGRADE_APPROVED=true; shift ;;
+    --backup-verified) BACKUP_VERIFIED=true; shift ;;
     --dry-run) DRY_RUN=true; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "Unknown option: $1" ;;
@@ -106,6 +112,12 @@ log "Plan: create LaunchAgent $LABEL"
 if [ "$DRY_RUN" = true ]; then
   log "Dry run complete; no changes made."
   exit 0
+fi
+
+if [ "$EVALUATION" = false ] && { [ -L "$BASE_DIR/current" ] || [ -e "$BASE_DIR/current" ]; }; then
+  if [ "$UPGRADE_APPROVED" != true ] || [ "$BACKUP_VERIFIED" != true ]; then
+    die "A managed production installation already exists. Complete the approved upgrade runbook and isolated restore verification, then re-run with --upgrade-approved --backup-verified."
+  fi
 fi
 
 if [ "$APPLY_LIMITS" = true ]; then

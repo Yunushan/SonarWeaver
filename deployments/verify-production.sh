@@ -28,16 +28,16 @@ while [ "$#" -gt 0 ]; do
 done
 
 case "$URL" in https://?*) ;; *) printf '%s\n' '--url must use HTTPS.' >&2; exit 1 ;; esac
-[ -r "$PASSCODE_FILE" ] && [ -s "$PASSCODE_FILE" ] || {
+if ! { [ -r "$PASSCODE_FILE" ] && [ -s "$PASSCODE_FILE" ]; }; then
   printf '%s\n' '--monitoring-passcode-file must be a readable, non-empty file.' >&2
   exit 1
-}
+fi
 command -v curl >/dev/null 2>&1 || { printf '%s\n' 'curl is required.' >&2; exit 1; }
 
 passcode=$(cat "$PASSCODE_FILE")
 file_size=$(wc -c <"$PASSCODE_FILE" | awk '{print $1}')
 flat_size=$(tr -d '\015\012' <"$PASSCODE_FILE" | wc -c | awk '{print $1}')
-case "$passcode" in *'"'*|*'\'*)
+case "$passcode" in *\"*|*\\*)
   printf '%s\n' 'Monitoring passcode must not contain quote or backslash characters.' >&2
   exit 1
   ;;

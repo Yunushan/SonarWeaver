@@ -50,8 +50,8 @@ prepare_env
 PATH="$TEST_ROOT/bin:$PATH" "$TEST_ROOT/docker/bootstrap.sh" production >/dev/null
 
 secret_mode=$(stat -c '%a' "$TEST_ROOT/docker/secrets/jdbc_password" 2>/dev/null || stat -f '%Lp' "$TEST_ROOT/docker/secrets/jdbc_password")
-[ "$secret_mode" = 600 ] || {
-  printf '%s\n' 'Docker bootstrap did not enforce owner-only JDBC secret permissions.' >&2
+[ "$secret_mode" = 644 ] || {
+  printf '%s\n' 'Docker bootstrap did not set the JDBC secret mode required by the non-root container process.' >&2
   exit 1
 }
 

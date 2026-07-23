@@ -30,7 +30,7 @@ case "${1:-}" in
       nodes)
         printf 'v1.%s.0+k3s1' "${KUBE_MINOR:-35}"
         ;;
-      storageclass|ingressclass|namespace|secret)
+      storageclass|ingressclass|namespace|secret|clusterissuer)
         exit 0
         ;;
       *)
@@ -63,6 +63,13 @@ set -eu
 case "${1:-}" in
   repo)
     exit 0
+    ;;
+  list)
+    if [ "${SONARWEAVER_HELM_RELEASE_EXISTS:-false}" = true ]; then
+      printf '%s\n' '[{"name":"sonarqube"}]'
+    else
+      printf '%s\n' '[]'
+    fi
     ;;
   upgrade)
     printf '%s\n' "$@" >"$SONARWEAVER_HELM_LOG"
@@ -161,6 +168,97 @@ grep -q 'cidr: "10.42.0.10/32"' "$KUBECTL_APPLY_LOG"
 grep -q 'port: 15432' "$KUBECTL_APPLY_LOG"
 grep -qx 'label namespace monitoring sonarweaver.io/network-access=monitoring --overwrite' "$KUBECTL_LABEL_LOG"
 grep -qx -- '--atomic' "$HELM_LOG"
+
+: >"$HELM_LOG"
+PATH="$TEST_ROOT/bin:$PATH" \
+  KUBE_MINOR=35 \
+  SONARWEAVER_HELM_LOG="$HELM_LOG" \
+  "$INSTALLER" \
+    --distribution k3s \
+    --profile production \
+    --jdbc-url 'jdbc:postgresql://db.example:5432/sonarqube' \
+    --jdbc-user sonarqube \
+    --jdbc-password-file "$TEST_ROOT/jdbc-password" \
+    --monitoring-passcode-file "$TEST_ROOT/monitoring-passcode" \
+    --monitoring-namespace monitoring \
+    --storage-class fast-rwo \
+    --database-egress-cidr 10.42.0.10/32 \
+    --hostname sonar.example \
+    --ingress-class nginx \
+    --ingress-namespace ingress-nginx \
+    --tls-secret sonar-tls \
+    --cert-manager-cluster-issuer letsencrypt-production \
+    --node-prerequisites-ready \
+    --dry-run >/dev/null
+
+grep -Fx 'ingress.annotations.cert-manager\.io/cluster-issuer=letsencrypt-production' "$HELM_LOG"
+
+if PATH="$TEST_ROOT/bin:$PATH" \
+  KUBE_MINOR=35 \
+  SONARWEAVER_HELM_LOG="$HELM_LOG" \
+  "$INSTALLER" \
+    --distribution k3s \
+    --profile evaluation \
+    --hostname sonar.example \
+    --ingress-class nginx \
+    --cert-manager-cluster-issuer letsencrypt-production \
+    --dry-run >/dev/null 2>&1; then
+  printf '%s\n' 'Evaluation mode unexpectedly accepted a cert-manager issuer.' >&2
+  exit 1
+fi
+
+: >"$HELM_LOG"
+: >"$KUBECTL_APPLY_LOG"
+UPGRADE_GATE_ERROR="$TEST_ROOT/upgrade-gate-error.log"
+if PATH="$TEST_ROOT/bin:$PATH" \
+  KUBE_MINOR=35 \
+  SONARWEAVER_HELM_LOG="$HELM_LOG" \
+  SONARWEAVER_HELM_RELEASE_EXISTS=true \
+  SONARWEAVER_KUBECTL_APPLY_LOG="$KUBECTL_APPLY_LOG" \
+  SONARWEAVER_KUBECTL_LABEL_LOG="$KUBECTL_LABEL_LOG" \
+  "$INSTALLER" \
+    --distribution k3s \
+    --profile production \
+    --jdbc-url 'jdbc:postgresql://db.example:5432/sonarqube' \
+    --jdbc-user sonarqube \
+    --jdbc-password-file "$TEST_ROOT/jdbc-password" \
+    --monitoring-passcode-file "$TEST_ROOT/monitoring-passcode" \
+    --monitoring-namespace monitoring \
+    --storage-class fast-rwo \
+    --database-egress-cidr 10.42.0.10/32 \
+    --node-prerequisites-ready >"$UPGRADE_GATE_ERROR" 2>&1; then
+  printf '%s\n' 'An existing production Helm release unexpectedly bypassed the upgrade acknowledgement gate.' >&2
+  exit 1
+fi
+grep -q -- '--upgrade-approved --backup-verified' "$UPGRADE_GATE_ERROR"
+[ ! -s "$HELM_LOG" ] || {
+  printf '%s\n' 'The rejected production upgrade reached Helm mutation.' >&2
+  exit 1
+}
+[ ! -s "$KUBECTL_APPLY_LOG" ] || {
+  printf '%s\n' 'The rejected production upgrade changed Kubernetes resources.' >&2
+  exit 1
+}
+
+PATH="$TEST_ROOT/bin:$PATH" \
+  KUBE_MINOR=35 \
+  SONARWEAVER_HELM_LOG="$HELM_LOG" \
+  SONARWEAVER_HELM_RELEASE_EXISTS=true \
+  SONARWEAVER_KUBECTL_APPLY_LOG="$KUBECTL_APPLY_LOG" \
+  SONARWEAVER_KUBECTL_LABEL_LOG="$KUBECTL_LABEL_LOG" \
+  "$INSTALLER" \
+    --distribution k3s \
+    --profile production \
+    --jdbc-url 'jdbc:postgresql://db.example:5432/sonarqube' \
+    --jdbc-user sonarqube \
+    --jdbc-password-file "$TEST_ROOT/jdbc-password" \
+    --monitoring-passcode-file "$TEST_ROOT/monitoring-passcode" \
+    --monitoring-namespace monitoring \
+    --storage-class fast-rwo \
+    --database-egress-cidr 10.42.0.10/32 \
+    --node-prerequisites-ready \
+    --upgrade-approved \
+    --backup-verified >/dev/null
 
 if PATH="$TEST_ROOT/bin:$PATH" \
   KUBE_MINOR=35 \

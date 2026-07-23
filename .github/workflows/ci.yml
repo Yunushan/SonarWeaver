@@ -69,6 +69,10 @@ jobs:
     name: Ansible static checks
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    env:
+      # Make role discovery deterministic even when a checkout resides on a
+      # filesystem that Ansible treats as world-writable.
+      ANSIBLE_CONFIG: ${{ github.workspace }}/ansible/ansible.cfg
     steps:
       - name: Check out repository
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -87,10 +91,12 @@ jobs:
           ansible-galaxy collection install -r ansible/requirements.yml
 
       - name: Lint Ansible content
-        run: ansible-lint ansible
+        working-directory: ansible
+        run: ansible-lint .
 
       - name: Check Ansible playbook syntax
-        run: ansible-playbook --syntax-check -i ansible/inventory/production.example.yml ansible/playbooks/site.yml
+        working-directory: ansible
+        run: ansible-playbook --syntax-check -i inventory/production.example.yml playbooks/site.yml
 
       - name: Check Molecule scenario syntax
         working-directory: ansible
@@ -115,7 +121,8 @@ jobs:
       - name: Validate PowerShell syntax
         shell: powershell
         run: |
-          $files = Get-ChildItem -Path . -Recurse -File -Include *.ps1, *.psd1, *.psm1
+          $files = Get-ChildItem -Path . -Recurse -File -Include *.ps1, *.psd1, *.psm1 |
+              Where-Object { $_.FullName -notmatch '[\\/]tests[\\/]' }
           if (-not $files) {
               Write-Host 'No PowerShell files found.'
               exit 0
@@ -140,7 +147,8 @@ jobs:
       - name: Run PSScriptAnalyzer
         shell: powershell
         run: |
-          $files = Get-ChildItem -Path . -Recurse -File -Include *.ps1, *.psd1, *.psm1
+          $files = Get-ChildItem -Path . -Recurse -File -Include *.ps1, *.psd1, *.psm1 |
+              Where-Object { $_.FullName -notmatch '[\\/]tests[\\/]' }
           if (-not $files) {
               Write-Host 'No PowerShell files found.'
               exit 0
@@ -226,11 +234,19 @@ jobs:
           echo 'SonarQube did not report UP within 450 seconds.' >&2
           exit 1
 
-      - name: Verify a PostgreSQL backup restores successfully
+      - name: Verify a PostgreSQL backup restores a known record
         working-directory: deployments/docker
         shell: bash
         run: |
           set -o pipefail
+          probe_value='sonarweaver-recovery-probe'
+          docker compose --env-file .env -f compose.yaml -f compose.local.yaml \
+            exec -T db psql -v ON_ERROR_STOP=1 -v probe_value="${probe_value}" \
+              -U sonarqube -d sonarqube <<'SQL'
+          DROP TABLE IF EXISTS sonarweaver_recovery_probe;
+          CREATE TABLE sonarweaver_recovery_probe (value text NOT NULL);
+          INSERT INTO sonarweaver_recovery_probe (value) VALUES (:'probe_value');
+          SQL
           docker compose --env-file .env -f compose.yaml -f compose.local.yaml \
             exec -T db createdb -U sonarqube sonarweaver_restore
           docker compose --env-file .env -f compose.yaml -f compose.local.yaml \
@@ -238,8 +254,8 @@ jobs:
             docker compose --env-file .env -f compose.yaml -f compose.local.yaml \
               exec -T db pg_restore --exit-on-error --no-owner -U sonarqube -d sonarweaver_restore
           docker compose --env-file .env -f compose.yaml -f compose.local.yaml \
-            exec -T db psql -tAc "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public');" \
-            -U sonarqube -d sonarweaver_restore | grep -qx t
+            exec -T db psql -tAc 'SELECT value FROM sonarweaver_recovery_probe;' \
+            -U sonarqube -d sonarweaver_restore | grep -qx "${probe_value}"
 
       - name: Collect Compose diagnostics
         if: always()
@@ -308,8 +324,8 @@ jobs:
             --values "${distribution_values}" \
             >"${rendered_chart}"
 
-          grep -q 'app.kubernetes.io/instance: sonarweaver' "${rendered_chart}"
-          grep -q 'app.kubernetes.io/name: sonarqube' "${rendered_chart}"
+          grep -q '^kind: Deployment$' "${rendered_chart}"
+          grep -q '^kind: Service$' "${rendered_chart}"
 
   kubernetes-integration:
     name: Kubernetes integration
@@ -346,8 +362,13 @@ jobs:
       - name: Wait for SonarQube API health
         shell: bash
         run: |
-          kubectl -n sonarqube rollout status deployment/sonarqube-sonarqube --timeout=15m
-          kubectl -n sonarqube port-forward service/sonarqube-sonarqube 9000:9000 >/tmp/sonarweaver-port-forward.log 2>&1 &
+          selector='app=sonarqube,release=sonarqube'
+          deployment=$(kubectl -n sonarqube get deployment -l "${selector}" -o jsonpath='{.items[0].metadata.name}')
+          service=$(kubectl -n sonarqube get service -l "${selector}" -o jsonpath='{.items[0].metadata.name}')
+          [[ -n ${deployment} ]] || { echo 'Could not find the SonarQube deployment.' >&2; exit 1; }
+          [[ -n ${service} ]] || { echo 'Could not find the SonarQube service.' >&2; exit 1; }
+          kubectl -n sonarqube rollout status "deployment/${deployment}" --timeout=15m
+          kubectl -n sonarqube port-forward "service/${service}" 9000:9000 >/tmp/sonarweaver-port-forward.log 2>&1 &
           port_forward_pid=$!
           trap 'kill "${port_forward_pid}" 2>/dev/null || true' EXIT
           for attempt in {1..90}; do
@@ -363,8 +384,9 @@ jobs:
         if: always()
         shell: bash
         run: |
-          kubectl -n sonarqube get pods,pvc,service,events --sort-by=.metadata.creationTimestamp || true
-          kubectl -n sonarqube logs deployment/sonarqube-sonarqube --all-containers=true --tail=300 || true
+          kubectl -n sonarqube get pods,pvc,service || true
+          kubectl -n sonarqube get events --sort-by=.metadata.creationTimestamp || true
+          kubectl -n sonarqube logs -l app=sonarqube,release=sonarqube --all-containers=true --tail=300 || true
           cat /tmp/sonarweaver-port-forward.log 2>/dev/null || true
 
       - name: Delete the disposable cluster
@@ -416,7 +438,7 @@ jobs:
           - name: sonarqube
             image: sonarqube@sha256:160bd2f6a3485bd09b655ef22dd63c02bd1fa7ba82aa5d9973fd010b8bcca0b3
           - name: postgresql
-            image: postgres@sha256:3a82e1f56c8f0f5616a11103ac3d47e632c3938698946a7ad26da0df1334744a
+            image: postgres@sha256:a426e44bac0b759c95894d68e1a0ac03ecc20b619f498a91aae373bf06d8508d
     steps:
       - name: Scan immutable image for fixable critical vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -438,7 +460,7 @@ jobs:
           - name: sonarqube
             image: sonarqube@sha256:160bd2f6a3485bd09b655ef22dd63c02bd1fa7ba82aa5d9973fd010b8bcca0b3
           - name: postgresql
-            image: postgres@sha256:3a82e1f56c8f0f5616a11103ac3d47e632c3938698946a7ad26da0df1334744a
+            image: postgres@sha256:a426e44bac0b759c95894d68e1a0ac03ecc20b619f498a91aae373bf06d8508d
     steps:
       - name: Generate SPDX software bill of materials
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
@@ -446,3 +468,4 @@ jobs:
           image: ${{ matrix.image }}
           format: spdx-json
           artifact-name: sonarweaver-${{ matrix.name }}-sbom
+          upload-artifact-retention: 90

@@ -25,6 +25,8 @@ EXPECTED_SHA256=
 EVALUATION=false
 NO_START=false
 DRY_RUN=false
+UPGRADE_APPROVED=false
+BACKUP_VERIFIED=false
 
 usage() {
   cat <<'EOF'
@@ -45,6 +47,8 @@ Options:
   --sha256 HEX                  Trusted archive checksum; otherwise GPG is used
   --evaluation                  Use embedded H2 (evaluation only)
   --no-start                    Install and enable without starting
+  --upgrade-approved            Acknowledge the approved production upgrade plan
+  --backup-verified             Acknowledge the isolated restore verification
   --dry-run                     Validate and print the plan only
   -h, --help                    Show this help
 
@@ -70,6 +74,8 @@ while [ "$#" -gt 0 ]; do
     --sha256) need_value "$@"; EXPECTED_SHA256=$2; shift 2 ;;
     --evaluation) EVALUATION=true; shift ;;
     --no-start) NO_START=true; shift ;;
+    --upgrade-approved) UPGRADE_APPROVED=true; shift ;;
+    --backup-verified) BACKUP_VERIFIED=true; shift ;;
     --dry-run) DRY_RUN=true; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "Unknown option: $1" ;;
@@ -112,6 +118,12 @@ log "Plan: persistent data=$DATA_DIR logs=$LOGS_DIR temp=$TEMP_DIR"
 if [ "$DRY_RUN" = true ]; then
   log "Dry run complete; no changes made."
   exit 0
+fi
+
+if [ "$EVALUATION" = false ] && { [ -L "$INSTALL_ROOT/current" ] || [ -e "$INSTALL_ROOT/current" ]; }; then
+  if [ "$UPGRADE_APPROVED" != true ] || [ "$BACKUP_VERIFIED" != true ]; then
+    die "A managed production installation already exists. Complete the approved upgrade runbook and isolated restore verification, then re-run with --upgrade-approved --backup-verified."
+  fi
 fi
 
 [ "$(id -u)" -eq 0 ] || die "Run this system installation as root (for example with sudo)."

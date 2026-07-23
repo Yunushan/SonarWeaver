@@ -64,6 +64,15 @@ SonarQube image differs from a running container, it requires
 substitute for a tested restore; use it only after completing the workflow
 below.
 
+The Kubernetes installer applies the same acknowledgement gate before changing
+an existing production Helm release. After the workflow below, re-run it with
+`--upgrade-approved --backup-verified`; a first production installation and a
+`--dry-run` do not require the flags.
+
+Direct native installers also require these acknowledgements when a managed
+production installation exists: `--upgrade-approved --backup-verified` on
+Linux/macOS or `-UpgradeApproved -BackupVerified` on Windows.
+
 ### RKE2 and K3s
 
 Record:

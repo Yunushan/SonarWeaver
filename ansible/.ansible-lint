@@ -1,0 +1,6 @@
+---
+# SonarWeaver exposes one shared, documented variable interface across its
+# roles. Keep role implementation variable names stable rather than adding
+# private role prefixes that would break inventory and group-variable inputs.
+skip_list:
+  - var-naming[no-role-prefix]

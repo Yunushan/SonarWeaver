@@ -81,7 +81,21 @@ switch ($Command) {
     }
     'install' {
         if ($Target -eq 'windows') {
-            & $WindowsInstaller @RemainingArguments
+            $windowsInstallerArguments = @()
+            $forwardUpgradeApproved = $UpgradeApproved
+            $forwardBackupVerified = $BackupVerified
+            foreach ($argument in $RemainingArguments) {
+                switch ($argument) {
+                    '-UpgradeApproved' { $forwardUpgradeApproved = $true }
+                    '-BackupVerified' { $forwardBackupVerified = $true }
+                    default { $windowsInstallerArguments += $argument }
+                }
+            }
+            $windowsParameters = @{
+                UpgradeApproved = $forwardUpgradeApproved
+                BackupVerified = $forwardBackupVerified
+            }
+            & $WindowsInstaller @windowsParameters @windowsInstallerArguments
         } elseif ($Target -eq 'docker') {
             $mode = 'evaluation'
             $dockerArguments = @($RemainingArguments)

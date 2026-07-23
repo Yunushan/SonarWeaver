@@ -1,0 +1,16 @@
+# Managed by SonarWeaver Ansible. HTTP is used only for ACME HTTP-01 and HTTPS redirect.
+server {
+    listen 80;
+    listen [::]:80;
+    server_name {{ sonarweaver_proxy_server_name }};
+
+    location ^~ /.well-known/acme-challenge/ {
+        root {{ sonarweaver_proxy_letsencrypt_webroot }};
+        default_type text/plain;
+        try_files $uri =404;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}

@@ -17,6 +17,8 @@ param(
     [string]$Sha256,
     [switch]$Evaluation,
     [switch]$NoStart,
+    [switch]$UpgradeApproved,
+    [switch]$BackupVerified,
     [switch]$DryRun
 )
 
@@ -115,8 +117,12 @@ if ($Evaluation) {
     if (-not (Test-Path -LiteralPath $JdbcPasswordFile -PathType Leaf)) {
         throw "Cannot read JDBC password file: $JdbcPasswordFile"
     }
-    if ((Get-Item -LiteralPath $JdbcPasswordFile).Length -eq 0) {
+    $jdbcPassword = [IO.File]::ReadAllText($JdbcPasswordFile)
+    if ([string]::IsNullOrEmpty($jdbcPassword)) {
         throw 'JDBC password file is empty.'
+    }
+    if ($jdbcPassword.Contains("`r") -or $jdbcPassword.Contains("`n")) {
+        throw 'JDBC password file must not contain line endings; create it without a trailing newline.'
     }
 }
 
@@ -133,6 +139,11 @@ Show-Log "Plan: register startup task $TaskName as Local Service"
 if ($DryRun) {
     Show-Log 'Dry run complete; no changes made.'
     return
+}
+if (-not $Evaluation -and (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue)) {
+    if (-not ($UpgradeApproved -and $BackupVerified)) {
+        throw 'A managed production installation already exists. Complete the approved upgrade runbook and isolated restore verification, then re-run with -UpgradeApproved -BackupVerified.'
+    }
 }
 Test-Administrator
 

@@ -48,6 +48,27 @@ sonarweaver_proxy_tls_certificate: /etc/pki/tls/certs/sonar.example.internal.crt
 sonarweaver_proxy_tls_certificate_key: /etc/pki/tls/private/sonar.example.internal.key
 ```
 
+For an opt-in Let's Encrypt certificate instead of pre-provisioned files, install
+Certbot from your approved operating-system repository first, ensure public DNS
+for the hostname points to this host, and permit inbound HTTP-01 validation on
+port 80. Do not set the custom certificate variables in this mode:
+
+```yaml
+sonarweaver_proxy_enabled: true
+sonarweaver_proxy_server_name: sonar.example.com
+sonarweaver_proxy_letsencrypt_enabled: true
+sonarweaver_proxy_letsencrypt_email: platform@example.com
+
+# Use the ACME staging service until DNS, routing, and renewal are proven.
+sonarweaver_proxy_letsencrypt_staging: true
+```
+
+The role creates a narrow HTTP-01 location and redirects all other HTTP traffic
+to HTTPS. It does not install Certbot, create public DNS records, open a
+firewall, or bypass ACME validation. After the initial certificate is issued it
+installs a dedicated `sonarweaver-certbot-renew.timer`; verify a staged renewal
+before switching `sonarweaver_proxy_letsencrypt_staging` to `false`.
+
 Run from the repository root:
 
 ```bash
@@ -57,7 +78,8 @@ ansible-playbook -i /secure/inventory.yml ansible/playbooks/site.yml
 The first run validates Java, creates the service identity and persistent
 directories, applies the required kernel limits, stages the pinned native
 installer, installs the release without starting it, renders the optional TLS
-proxy, validates its certificate/key paths and `nginx -t`, then starts
+proxy, validates its certificate/key paths (or completes the explicitly enabled
+ACME HTTP-01 request) and `nginx -t`, then starts
 SonarQube and waits for `/api/system/status` to return `UP`.
 
 ## Secrets

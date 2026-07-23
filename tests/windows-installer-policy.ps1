@@ -26,7 +26,13 @@ $requiredControls = @(
     '& $gpg.Source --batch --homedir $gpgHome --verify $Signature $Archive',
     "New-ScheduledTaskPrincipal -UserId 'NT AUTHORITY\LOCAL SERVICE'",
     'Copy-Item -LiteralPath $JdbcPasswordFile -Destination $passwordTarget -Force',
-    '& icacls.exe $passwordTarget /inheritance:r'
+    '& icacls.exe $passwordTarget /inheritance:r',
+    '[switch]$UpgradeApproved',
+    '[switch]$BackupVerified',
+    'Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue',
+    'isolated restore verification',
+    '[IO.File]::ReadAllText($JdbcPasswordFile)',
+    'JDBC password file must not contain line endings'
 )
 
 foreach ($control in $requiredControls) {
@@ -64,6 +70,14 @@ foreach ($control in (
 if (-not $wrapperContent.Contains('& $DockerBootstrap @dockerParameters')) {
     throw 'Windows command wrapper must forward Docker production safety options.'
 }
+if (-not $wrapperContent.Contains('& $WindowsInstaller @windowsParameters @windowsInstallerArguments')) {
+    throw 'Windows command wrapper must forward native Windows production safety options.'
+}
+foreach ($control in ("'-UpgradeApproved' { `$forwardUpgradeApproved = `$true }", "'-BackupVerified' { `$forwardBackupVerified = `$true }")) {
+    if (-not $wrapperContent.Contains($control)) {
+        throw "Windows command wrapper is missing native Windows safety option forwarding: $control"
+    }
+}
 foreach ($control in ('[switch]$UpgradeApproved', '[switch]$BackupVerified', "'-UpgradeApproved' { `$forwardUpgradeApproved = `$true }", "'-BackupVerified' { `$forwardBackupVerified = `$true }")) {
     if (-not $wrapperContent.Contains($control)) {
         throw "Windows command wrapper is missing Docker safety option forwarding: $control"
@@ -74,7 +88,8 @@ $testRoot = Join-Path ([IO.Path]::GetTempPath()) ("sonarweaver-wrapper-test-{0}"
 try {
     $testBin = Join-Path $testRoot 'bin'
     $testDocker = Join-Path $testRoot 'deployments\docker'
-    New-Item -ItemType Directory -Path $testBin, $testDocker -Force | Out-Null
+    $testWindows = Join-Path $testRoot 'deployments\native\windows'
+    New-Item -ItemType Directory -Path $testBin, $testDocker, $testWindows -Force | Out-Null
     Copy-Item -LiteralPath $wrapper -Destination (Join-Path $testBin 'sonarweaver.ps1')
     @'
 param(
@@ -88,6 +103,15 @@ Write-Output "$Mode|$UpgradeApproved|$BackupVerified|$($UnexpectedArguments -joi
 '@ | Set-Content -LiteralPath (Join-Path $testDocker 'Bootstrap.ps1') -Encoding ASCII
     @'
 param(
+    [switch]$UpgradeApproved,
+    [switch]$BackupVerified,
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [string[]]$UnexpectedArguments
+)
+Write-Output "$UpgradeApproved|$BackupVerified|$($UnexpectedArguments -join ',')"
+'@ | Set-Content -LiteralPath (Join-Path $testWindows 'Install-SonarQube.ps1') -Encoding ASCII
+    @'
+param(
     [uri]$Url,
     [string]$MonitoringPasscodeFile
 )
@@ -97,6 +121,11 @@ Write-Output "$Url|$MonitoringPasscodeFile"
     $forwarded = & (Join-Path $testBin 'sonarweaver.ps1') install docker production -UpgradeApproved -BackupVerified
     if ($forwarded -notcontains 'production|True|True|') {
         throw "Windows command wrapper did not forward Docker safety options: $forwarded"
+    }
+
+    $nativeForwarded = & (Join-Path $testBin 'sonarweaver.ps1') install windows -UpgradeApproved -BackupVerified
+    if ($nativeForwarded -notcontains 'True|True|') {
+        throw "Windows command wrapper did not forward native Windows safety options: $nativeForwarded"
     }
 
     $verification = & (Join-Path $testBin 'sonarweaver.ps1') verify `

@@ -11,9 +11,11 @@ SonarWeaver is an unofficial, reproducible deployment toolkit for SonarQube Comm
 - A Docker Compose deployment with persistent volumes
 - Official Helm chart integration for RKE2 and K3s
 - Optional Ansible production path for managed native Linux hosts
+- Optional Let's Encrypt integration through an existing cert-manager ClusterIssuer or approved Certbot installation
 - Preflight checks for platform, Java, Linux kernel limits, deployment configuration, and Kubernetes compatibility
 - Pinned product versions instead of floating production tags
 - Operational guidance for TLS, secrets, backups, upgrades, rollback, and troubleshooting
+- A redaction-safe production acceptance record template for external change control
 - Safe defaults: production rejects H2, destructive data removal is not automated, and generic Unix is never presented as upstream-supported
 
 ## Pinned release channels
@@ -133,7 +135,7 @@ bash deployments/kubernetes/scripts/install.sh --help
 ./bin/sonarweaver status rke2
 ```
 
-Replace `rke2` with `k3s` for K3s. This quick start is disposable H2 evaluation mode. Use the matching values overlay under `deployments/kubernetes/rke2/` or `deployments/kubernetes/k3s/`. The production installer validates that the current Kubernetes minor version is between 1.32 and 1.35 and requires explicit storage, node-readiness, database, and secret-file inputs.
+Replace `rke2` with `k3s` for K3s. This quick start is disposable H2 evaluation mode. Use the matching values overlay under `deployments/kubernetes/rke2/` or `deployments/kubernetes/k3s/`. The production installer validates that the current Kubernetes minor version is between 1.32 and 1.35 and requires explicit storage, node-readiness, database, and secret-file inputs. Changing an existing production Helm release also requires explicit upgrade and restore-verification acknowledgements.
 
 ### Managed Linux with Ansible
 

@@ -7,6 +7,7 @@ static check is necessary but not sufficient.
 | Gate | Required evidence | Owner |
 |---|---|---|
 | Release integrity | Reviewed pins/digests, CI green, and no unresolved critical deployment-tooling finding | Release owner |
+| Delivery governance | Protected default branch requires reviewed pull requests and the named CI checks; force-push and branch deletion are blocked; Dependabot vulnerability alerts/security updates and GitHub Actions SHA-pinning enforcement are enabled | Repository owner |
 | Runtime validation | Green Docker and Kubernetes integration jobs for the exact revision | Release owner |
 | Database recovery | A restore of the intended database backup into an isolated environment, with date, duration, and result recorded | Database owner |
 | Network and TLS | Verified HTTPS endpoint, valid certificate chain, restrictive ingress and egress policy, and documented approved external flows | Platform owner |
@@ -22,6 +23,10 @@ version, image/chart digests, database version, test date, approver, result,
 and links to the redacted CI, monitoring, and restore evidence. Store that
 record in the organisation's approved change-management system, not in this
 repository if it contains infrastructure details.
+
+Use the [production acceptance record template](production-acceptance-record.template.md)
+to structure that external record. It deliberately requires references rather
+than secrets or internal deployment details.
 
 The toolkit can automate deployment checks, but it cannot truthfully certify
 these environment-specific gates without that operational evidence.

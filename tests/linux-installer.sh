@@ -47,4 +47,7 @@ grep -qx 'ProtectSystem=strict' "$service_template"
 grep -qx 'ReadWritePaths=@DATA_DIR@ @LOGS_DIR@ @TEMP_DIR@' "$service_template"
 grep -qx 'CapabilityBoundingSet=' "$service_template"
 grep -qx 'RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6' "$service_template"
+grep -qx '  --upgrade-approved            Acknowledge the approved production upgrade plan' "$INSTALLER"
+grep -qx '  --backup-verified             Acknowledge the isolated restore verification' "$INSTALLER"
+grep -q 'A managed production installation already exists' "$INSTALLER"
 printf '%s\n' 'Linux installer contract tests passed.'

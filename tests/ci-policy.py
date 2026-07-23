@@ -26,6 +26,23 @@ if "kindest/node:v1.35.0@sha256:452d707d4862f52530247495d180205e029056831160e228
     failures.append("CI must pin the Kind Kubernetes node image by immutable digest.")
 if "pip install -r requirements-ci.txt" not in workflow:
     failures.append("CI must install its Python tooling from the reviewed requirements lock.")
+if "upload-artifact-retention: 90" not in workflow:
+    failures.append("CI must retain generated SBOM artifacts for 90 days rather than relying on repository defaults.")
+if "grep -q '^kind: Deployment$'" not in workflow or "grep -q '^kind: Service$'" not in workflow:
+    failures.append("Helm CI must verify that the pinned chart renders its deployment and service resources.")
+if "selector='app=sonarqube,release=sonarqube'" not in workflow or 'rollout status "deployment/${deployment}"' not in workflow:
+    failures.append("Kubernetes integration must discover chart resource names through the documented release selector.")
+if "working-directory: ansible\n        run: ansible-lint ." not in workflow:
+    failures.append("Ansible lint must run from the Ansible project directory so its role path and lint configuration apply.")
+if "ANSIBLE_CONFIG: ${{ github.workspace }}/ansible/ansible.cfg" not in workflow:
+    failures.append("Ansible CI must explicitly select its checked-in configuration for deterministic role discovery.")
+for required in (
+    "sonarweaver_recovery_probe",
+    "pg_dump --format=custom",
+    "pg_restore --exit-on-error --no-owner",
+):
+    if required not in workflow:
+        failures.append(f"CI must prove a PostgreSQL backup restores known data: {required}")
 
 for requirement in (
     "ansible-core==2.20.2",
@@ -66,6 +83,32 @@ for required in (
     if required not in policy_template:
         failures.append(f"NetworkPolicy template is missing required production control: {required}")
 
+kubernetes_installer = (ROOT / "deployments" / "kubernetes" / "scripts" / "install.sh").read_text(encoding="utf-8")
+for required in (
+    'helm list --namespace "$NAMESPACE" --filter "^$RELEASE$" --output json',
+    "--upgrade-approved",
+    "--backup-verified",
+    "isolated restore verification",
+    "--cert-manager-cluster-issuer",
+    "ingress.annotations.cert-manager",
+):
+    if required not in kubernetes_installer:
+        failures.append(f"Kubernetes installer is missing a required production control: {required}")
+
+ansible_proxy_tasks = (ROOT / "ansible" / "roles" / "sonarweaver_proxy" / "tasks" / "main.yml").read_text(encoding="utf-8")
+for required in (
+    "sonarweaver_proxy_letsencrypt_enabled",
+    "certbot",
+    "--webroot",
+    "sonarweaver-certbot-renew.timer",
+):
+    if required not in ansible_proxy_tasks:
+        failures.append(f"Managed NGINX must retain the optional Let's Encrypt control: {required}")
+
+gitleaks_config = ROOT / ".gitleaks.toml"
+if not gitleaks_config.exists() or "679F1EE92B19609DE816FDE81DB198F93525EC1A" not in gitleaks_config.read_text(encoding="utf-8"):
+    failures.append("Gitleaks must document the public SonarSource signing-key fingerprint false-positive exception.")
+
 kubernetes_values = (ROOT / "deployments" / "kubernetes" / "common" / "values.yaml").read_text(encoding="utf-8")
 for required in (
     "replicaCount: 1",
@@ -77,6 +120,23 @@ for required in (
 ):
     if required not in kubernetes_values:
         failures.append(f"Kubernetes values are missing required production control: {required!r}")
+
+docker_evaluation = (ROOT / "deployments" / "docker" / "compose.local.yaml").read_text(encoding="utf-8")
+for required in (
+    "cap_drop:\n      - ALL",
+    "cap_add:\n      - CHOWN\n      - SETGID\n      - SETUID",
+):
+    if required not in docker_evaluation:
+        failures.append(f"Evaluation PostgreSQL must retain its reviewed least-privilege capability policy: {required!r}")
+
+readiness_gates = (ROOT / "docs" / "production-readiness-gates.md").read_text(encoding="utf-8")
+for required in (
+    "| Delivery governance |",
+    "Dependabot vulnerability alerts/security updates",
+    "GitHub Actions SHA-pinning enforcement",
+):
+    if required not in readiness_gates:
+        failures.append(f"Production acceptance guidance must retain the delivery-governance requirement: {required}")
 
 if failures:
     print("\n".join(failures), file=sys.stderr)

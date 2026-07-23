@@ -27,9 +27,12 @@ INGRESS_CLASS=
 INGRESS_NAMESPACE=
 MONITORING_NAMESPACE=
 TLS_SECRET=
+CERT_MANAGER_CLUSTER_ISSUER=
 NODE_PREREQUISITES_READY=false
 ALLOW_UNSUPPORTED_KUBERNETES=false
 DRY_RUN=false
+UPGRADE_APPROVED=false
+BACKUP_VERIFIED=false
 
 log() { printf '%s\n' "[sonarweaver] $*" >&2; }
 die() { printf '%s\n' "[sonarweaver] ERROR: $*" >&2; exit 1; }
@@ -73,6 +76,7 @@ validate_cidr() {
       [ "$prefix" -le 32 ] 2>/dev/null || return 1
       old_ifs=$IFS
       IFS=.
+      # shellcheck disable=SC2086 # Deliberate split on the temporary dot-only IFS.
       set -- $address
       IFS=$old_ifs
       [ "$#" -eq 4 ] || return 1
@@ -99,6 +103,7 @@ validate_cidr() {
       esac
       old_ifs=$IFS
       IFS=:
+      # shellcheck disable=SC2086 # Deliberate split on the temporary colon-only IFS.
       set -- $address
       IFS=$old_ifs
       if [ "$compressed" = true ]; then
@@ -150,9 +155,14 @@ Options:
   --ingress-namespace NAME          Ingress controller namespace; required with --hostname in production
   --monitoring-namespace NAME       Prometheus namespace; required in production
   --tls-secret NAME                 Existing TLS secret; required with --hostname in production
+  --cert-manager-cluster-issuer NAME
+                                    Existing cert-manager ClusterIssuer to obtain the
+                                    --tls-secret certificate (for example, Let's Encrypt)
   --database-egress-cidr CIDR       Production IPv4 or IPv6 database network CIDR
   --database-port PORT              Production database TCP port (default: 5432)
   --allow-unsupported-kubernetes    Bypass the chart's Kubernetes 1.32-1.35 gate
+  --upgrade-approved                Acknowledge the approved production upgrade plan
+  --backup-verified                 Acknowledge the isolated restore verification
   --dry-run                         Render manifests without applying them
   -h, --help                        Show this help
 
@@ -182,8 +192,11 @@ while [ "$#" -gt 0 ]; do
     --ingress-namespace) need_value "$@"; INGRESS_NAMESPACE=$2; shift 2 ;;
     --monitoring-namespace) need_value "$@"; MONITORING_NAMESPACE=$2; shift 2 ;;
     --tls-secret) need_value "$@"; TLS_SECRET=$2; shift 2 ;;
+    --cert-manager-cluster-issuer) need_value "$@"; CERT_MANAGER_CLUSTER_ISSUER=$2; shift 2 ;;
     --node-prerequisites-ready) NODE_PREREQUISITES_READY=true; shift ;;
     --allow-unsupported-kubernetes) ALLOW_UNSUPPORTED_KUBERNETES=true; shift ;;
+    --upgrade-approved) UPGRADE_APPROVED=true; shift ;;
+    --backup-verified) BACKUP_VERIFIED=true; shift ;;
     --dry-run) DRY_RUN=true; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "Unknown option: $1" ;;
@@ -206,6 +219,10 @@ if [ -n "$HOSTNAME" ]; then
 fi
 if [ -n "$TLS_SECRET" ]; then
   validate_dns_name "$TLS_SECRET" || die "--tls-secret must be a lowercase Kubernetes resource name."
+fi
+if [ -n "$CERT_MANAGER_CLUSTER_ISSUER" ]; then
+  validate_dns_label "$CERT_MANAGER_CLUSTER_ISSUER" 63 || \
+    die "--cert-manager-cluster-issuer must be a lowercase DNS label of at most 63 characters."
 fi
 if [ -n "$INGRESS_NAMESPACE" ]; then
   validate_dns_label "$INGRESS_NAMESPACE" 63 || die "--ingress-namespace must be a lowercase DNS label of at most 63 characters."
@@ -245,6 +262,10 @@ if [ -n "$HOSTNAME" ]; then
   [ -n "$INGRESS_CLASS" ] || die "--hostname requires --ingress-class."
   validate_dns_name "$INGRESS_CLASS" || die "--ingress-class must be a lowercase Kubernetes resource name."
 fi
+if [ -n "$CERT_MANAGER_CLUSTER_ISSUER" ]; then
+  [ -n "$HOSTNAME" ] || die "--cert-manager-cluster-issuer requires --hostname."
+  [ "$PROFILE" = production ] || die "--cert-manager-cluster-issuer is available only in production mode."
+fi
 
 temp_dir=$(mktemp -d "${TMPDIR:-/tmp}/sonarweaver-helm.XXXXXX")
 cleanup() { rm -rf "$temp_dir"; }
@@ -267,6 +288,10 @@ if [ "$PROFILE" = production ]; then
   if [ -n "$HOSTNAME" ]; then
     [ -n "$TLS_SECRET" ] || die "Production ingress requires --tls-secret."
     [ -n "$INGRESS_NAMESPACE" ] || die "Production ingress requires --ingress-namespace."
+    if [ -n "$CERT_MANAGER_CLUSTER_ISSUER" ]; then
+      kubectl get clusterissuer "$CERT_MANAGER_CLUSTER_ISSUER" >/dev/null 2>&1 || \
+        die "cert-manager ClusterIssuer $CERT_MANAGER_CLUSTER_ISSUER was not found in the current cluster."
+    fi
   fi
 else
   [ -z "$JDBC_URL$JDBC_USER$JDBC_PASSWORD_FILE$STORAGE_CLASS" ] || die "Evaluation mode does not accept JDBC or storage options."
@@ -282,6 +307,17 @@ else
     validate_secret_file "--monitoring-passcode-file" "$MONITORING_PASSCODE_FILE"
   fi
   log "Evaluation mode selected: embedded H2 and no persistence."
+fi
+
+if [ "$PROFILE" = production ] && [ "$DRY_RUN" = false ]; then
+  if ! existing_releases=$(helm list --namespace "$NAMESPACE" --filter "^$RELEASE$" --output json); then
+    die "Could not inspect existing Helm releases; resolve cluster access before changing production resources."
+  fi
+  if printf '%s' "$existing_releases" | grep -q '"name"'; then
+    if [ "$UPGRADE_APPROVED" != true ] || [ "$BACKUP_VERIFIED" != true ]; then
+      die "The Helm release already exists. Complete the approved upgrade runbook and isolated restore verification, then re-run with --upgrade-approved --backup-verified."
+    fi
+  fi
 fi
 
 if [ -n "$HOSTNAME" ]; then
@@ -340,6 +376,10 @@ if [ -n "$HOSTNAME" ]; then
       --set-string "ingress.tls[0].secretName=$TLS_SECRET" \
       --set-string "ingress.tls[0].hosts[0]=$HOSTNAME"
   fi
+  if [ -n "$CERT_MANAGER_CLUSTER_ISSUER" ]; then
+    set -- "$@" \
+      --set-string "ingress.annotations.cert-manager\\.io/cluster-issuer=$CERT_MANAGER_CLUSTER_ISSUER"
+  fi
 fi
 
 if [ "$DRY_RUN" = true ]; then
@@ -361,8 +401,10 @@ if [ "$PROFILE" = production ]; then
   if [ -n "$HOSTNAME" ]; then
     kubectl get namespace "$INGRESS_NAMESPACE" >/dev/null 2>&1 || \
       die "Ingress namespace $INGRESS_NAMESPACE was not found in the current cluster."
-    kubectl -n "$NAMESPACE" get secret "$TLS_SECRET" >/dev/null 2>&1 || \
-      die "TLS secret $TLS_SECRET was not found in namespace $NAMESPACE."
+    if [ -z "$CERT_MANAGER_CLUSTER_ISSUER" ]; then
+      kubectl -n "$NAMESPACE" get secret "$TLS_SECRET" >/dev/null 2>&1 || \
+        die "TLS secret $TLS_SECRET was not found in namespace $NAMESPACE."
+    fi
     kubectl label namespace "$INGRESS_NAMESPACE" sonarweaver.io/network-access=ingress --overwrite >/dev/null
   fi
   [ -f "$network_policy_template" ] || die "NetworkPolicy template is missing: $network_policy_template"

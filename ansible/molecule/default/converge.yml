@@ -1,0 +1,8 @@
+---
+# This scenario validates Ansible/Molecule wiring only. It deliberately has no
+# managed platform or mutation step; real host changes require the production
+# inventory and the documented acceptance process.
+- name: Validate SonarWeaver Ansible scenario syntax
+  hosts: all
+  gather_facts: false
+  tasks: []
