@@ -324,7 +324,7 @@ jobs:
             --values "${distribution_values}" \
             >"${rendered_chart}"
 
-          grep -q '^kind: Deployment$' "${rendered_chart}"
+          grep -Eq '^kind: (Deployment|StatefulSet)$' "${rendered_chart}"
           grep -q '^kind: Service$' "${rendered_chart}"
 
   kubernetes-integration:
@@ -363,12 +363,14 @@ jobs:
         shell: bash
         run: |
           selector='app=sonarqube,release=sonarqube'
-          deployment=$(kubectl -n sonarqube get deployment -l "${selector}" -o jsonpath='{.items[0].metadata.name}')
-          service=$(kubectl -n sonarqube get service -l "${selector}" -o jsonpath='{.items[0].metadata.name}')
-          [[ -n ${deployment} ]] || { echo 'Could not find the SonarQube deployment.' >&2; exit 1; }
+          deployment=$(kubectl -n sonarqube get deployment -l "${selector}" -o name)
+          statefulset=$(kubectl -n sonarqube get statefulset -l "${selector}" -o name)
+          workload=${deployment:-${statefulset}}
+          service=$(kubectl -n sonarqube get service -l "${selector}" -o name)
+          [[ -n ${workload} ]] || { echo 'Could not find the SonarQube workload.' >&2; exit 1; }
           [[ -n ${service} ]] || { echo 'Could not find the SonarQube service.' >&2; exit 1; }
-          kubectl -n sonarqube rollout status "deployment/${deployment}" --timeout=15m
-          kubectl -n sonarqube port-forward "service/${service}" 9000:9000 >/tmp/sonarweaver-port-forward.log 2>&1 &
+          kubectl -n sonarqube rollout status "${workload}" --timeout=15m
+          kubectl -n sonarqube port-forward "${service}" 9000:9000 >/tmp/sonarweaver-port-forward.log 2>&1 &
           port_forward_pid=$!
           trap 'kill "${port_forward_pid}" 2>/dev/null || true' EXIT
           for attempt in {1..90}; do
@@ -438,7 +440,7 @@ jobs:
           - name: sonarqube
             image: sonarqube@sha256:160bd2f6a3485bd09b655ef22dd63c02bd1fa7ba82aa5d9973fd010b8bcca0b3
           - name: postgresql
-            image: postgres@sha256:a426e44bac0b759c95894d68e1a0ac03ecc20b619f498a91aae373bf06d8508d
+            image: postgres@sha256:1961f96e6029a02c3812d7cb329a3b03a3ac2bb067058dec17b0f5596aca9296
     steps:
       - name: Scan immutable image for fixable critical vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -460,7 +462,7 @@ jobs:
           - name: sonarqube
             image: sonarqube@sha256:160bd2f6a3485bd09b655ef22dd63c02bd1fa7ba82aa5d9973fd010b8bcca0b3
           - name: postgresql
-            image: postgres@sha256:a426e44bac0b759c95894d68e1a0ac03ecc20b619f498a91aae373bf06d8508d
+            image: postgres@sha256:1961f96e6029a02c3812d7cb329a3b03a3ac2bb067058dec17b0f5596aca9296
     steps:
       - name: Generate SPDX software bill of materials
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0

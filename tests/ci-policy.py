@@ -28,10 +28,14 @@ if "pip install -r requirements-ci.txt" not in workflow:
     failures.append("CI must install its Python tooling from the reviewed requirements lock.")
 if "upload-artifact-retention: 90" not in workflow:
     failures.append("CI must retain generated SBOM artifacts for 90 days rather than relying on repository defaults.")
-if "grep -q '^kind: Deployment$'" not in workflow or "grep -q '^kind: Service$'" not in workflow:
-    failures.append("Helm CI must verify that the pinned chart renders its deployment and service resources.")
-if "selector='app=sonarqube,release=sonarqube'" not in workflow or 'rollout status "deployment/${deployment}"' not in workflow:
-    failures.append("Kubernetes integration must discover chart resource names through the documented release selector.")
+if "grep -Eq '^kind: (Deployment|StatefulSet)$'" not in workflow or "grep -q '^kind: Service$'" not in workflow:
+    failures.append("Helm CI must verify that the pinned chart renders its workload and service resources.")
+if (
+    "selector='app=sonarqube,release=sonarqube'" not in workflow
+    or "get statefulset -l" not in workflow
+    or 'rollout status "${workload}"' not in workflow
+):
+    failures.append("Kubernetes integration must discover the chart workload and service through documented release labels.")
 if "working-directory: ansible\n        run: ansible-lint ." not in workflow:
     failures.append("Ansible lint must run from the Ansible project directory so its role path and lint configuration apply.")
 if "ANSIBLE_CONFIG: ${{ github.workspace }}/ansible/ansible.cfg" not in workflow:
