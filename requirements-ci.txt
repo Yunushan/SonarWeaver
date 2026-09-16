@@ -2,4 +2,4 @@
 ansible-core==2.21.2
 ansible-lint==26.6.0
 molecule==26.6.0
-zizmor==1.28.0
+zizmor==1.30.1
