@@ -471,7 +471,7 @@ jobs:
             image: postgres@sha256:1961f96e6029a02c3812d7cb329a3b03a3ac2bb067058dec17b0f5596aca9296
     steps:
       - name: Generate SPDX software bill of materials
-        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         with:
           image: ${{ matrix.image }}
           format: spdx-json
